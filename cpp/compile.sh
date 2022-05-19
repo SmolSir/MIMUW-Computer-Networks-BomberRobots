@@ -1,0 +1,1 @@
+/opt/gcc-11.2/bin/g++-11.2 -std=c++20 client.cpp -o client -l pthread -lboost_program_options
