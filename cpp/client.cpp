@@ -154,37 +154,95 @@ int main(int argc, char *argv[]) {
         // vector<uint8_t> message5 = {89, 69, 83};
         // uint16_t one = 1, two = 2;
         // map<uint16_t, string> message6 = {{one, "Ola"}, {two, "Bart"}};
+        // ClientMessageServer message7 = Move {Direction::Up};
+
         // serialize(message1, buf);
         // serialize(message2, buf);
         // serialize(message3, buf);
         // serialize(message4, buf);
         // serialize(message5, buf);
         // serialize(message6, buf);
+        // serialize(message7, buf);
+        
         // print_streambuf(buf);
-
-        // gui_socket.send_to(buf.data(), gui_endpoint);
 
         // TEST 2
         boost::asio::streambuf buf2;
-        const char code = (char) DrawMessage::Lobby;
-        buf2.sputn(&code, sizeof(code));
-        Lobby lobby = {
-            "Hello, world!",
-            1,
-            10,
-            10,
-            100,
-            2,
-            5,
-            {{1, {"SmolSir", "127.0.0.1:10022"}}}
+        ClientMessageGui lobby = Lobby {
+            .server_name = "Hello, world!",
+            .players_count = 1,
+            .size_x = 10,
+            .size_y = 10,
+            .game_length = 100,
+            .explosion_radius = 5,
+            .bomb_timer = 20,
+            .players = {{1, {"SmolSir", "127.0.0.1:10022"}}}
         };
         serialize(lobby, buf2);
-        print_streambuf(buf2);
-
         gui_socket.send_to(buf2.data(), gui_endpoint);
 
-        co_spawn(io_context, gui_listener(), detached);
-        co_spawn(io_context, server_listener(), detached);
+        sleep(5);
+
+        // TEST 3
+        boost::asio::streambuf buf3;
+        ClientMessageGui game = Game {
+            .server_name = "Hello, world!",
+            .size_x = 10,
+            .size_y = 10,
+            .game_length = 100,
+            .turn = 5,
+            .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+            .player_positions = {{1, {5, 5}}},
+            .blocks = {{1, 1}},
+            .bombs = {{{2, 2}, 100}},
+            .explosions = {{3, 3}},
+            .scores = {{1, 42}}
+        };
+        serialize(game, buf3);
+        print_streambuf(buf3);
+        gui_socket.send_to(buf3.data(), gui_endpoint);
+
+        // TEST 4
+        // boost::asio::streambuf buf4;
+        // ClientMessageGui game = Game {
+        //     .server_name = "Hello, world!",
+        //     .size_x = 7,
+        //     .size_y = 7,
+        //     .game_length = 9,
+        //     .turn = 6,
+        //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+        //     .player_positions = {{1, {3, 4}}},
+        //     .blocks = {{3, 1}, {3, 2}, {3, 3}},
+        //     .bombs = {{{2, 1}, 1}, {{4, 1}, 1}},
+        //     .explosions = {{3, 5}},
+        //     .scores = {{1, 42}}
+        // };
+        // serialize(game, buf4);
+        // print_streambuf(buf4);
+        // gui_socket.send_to(buf4.data(), gui_endpoint);
+
+        // TEST 5
+        // boost::asio::streambuf buf5;
+        // uint8_t i_8 = 8;
+        // uint16_t i_16 = 16;
+        // uint32_t i_32 = 32;
+        // serialize(i_8, buf5);
+        // serialize(i_16, buf5);
+        // serialize(i_32, buf5);
+
+        // print_streambuf(buf5);
+        // auto reader = [&buf5](void *arg, size_t read_size) {
+        //     buf5.sgetn((char *) arg, read_size);
+        // };
+
+        // uint8_t i_8_des;
+        // uint16_t i_16_des;
+        // uint32_t i_32_des;
+
+
+
+        // co_spawn(io_context, gui_listener(), detached);
+        // co_spawn(io_context, server_listener(), detached);
 
         io_context.run();
     }
