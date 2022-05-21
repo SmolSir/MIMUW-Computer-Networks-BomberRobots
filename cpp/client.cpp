@@ -23,7 +23,7 @@ struct sockaddr_str {
     string port;
 };
 
-string make_string(boost::asio::streambuf& streambuf) {
+string make_string(boost::asio::streambuf &streambuf) {
     return {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
 }
 
@@ -109,6 +109,19 @@ awaitable<void> server_listener() {
     }
 }
 
+boost::asio::streambuf UDP_buffer;
+
+void read_UDP(void *arg, size_t size) {
+    if (UDP_buffer.size() < size) {
+        throw length_error("unexpected EOF in read_UDP from UDP_buffer\n");
+    }
+    UDP_buffer.sgetn((char *) arg, size);
+}
+
+void read_TCP(void *arg, size_t size) {
+
+}
+
 int main(int argc, char *argv[]) {
 
     sockaddr_str gui;
@@ -167,40 +180,40 @@ int main(int argc, char *argv[]) {
         // print_streambuf(buf);
 
         // TEST 2
-        boost::asio::streambuf buf2;
-        ClientMessageGui lobby = Lobby {
-            .server_name = "Hello, world!",
-            .players_count = 1,
-            .size_x = 10,
-            .size_y = 10,
-            .game_length = 100,
-            .explosion_radius = 5,
-            .bomb_timer = 20,
-            .players = {{1, {"SmolSir", "127.0.0.1:10022"}}}
-        };
-        serialize(lobby, buf2);
-        gui_socket.send_to(buf2.data(), gui_endpoint);
+        // boost::asio::streambuf buf2;
+        // ClientMessageGui lobby = Lobby {
+        //     .server_name = "Hello, world!",
+        //     .players_count = 1,
+        //     .size_x = 10,
+        //     .size_y = 10,
+        //     .game_length = 100,
+        //     .explosion_radius = 5,
+        //     .bomb_timer = 20,
+        //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}}
+        // };
+        // serialize(lobby, buf2);
+        // gui_socket.send_to(buf2.data(), gui_endpoint);
 
-        sleep(5);
+        // sleep(5);
 
         // TEST 3
-        boost::asio::streambuf buf3;
-        ClientMessageGui game = Game {
-            .server_name = "Hello, world!",
-            .size_x = 10,
-            .size_y = 10,
-            .game_length = 100,
-            .turn = 5,
-            .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
-            .player_positions = {{1, {5, 5}}},
-            .blocks = {{1, 1}},
-            .bombs = {{{2, 2}, 100}},
-            .explosions = {{3, 3}},
-            .scores = {{1, 42}}
-        };
-        serialize(game, buf3);
-        print_streambuf(buf3);
-        gui_socket.send_to(buf3.data(), gui_endpoint);
+        // boost::asio::streambuf buf3;
+        // ClientMessageGui game = Game {
+        //     .server_name = "Hello, world!",
+        //     .size_x = 10,
+        //     .size_y = 10,
+        //     .game_length = 100,
+        //     .turn = 5,
+        //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+        //     .player_positions = {{1, {5, 5}}},
+        //     .blocks = {{1, 1}},
+        //     .bombs = {{{2, 2}, 100}},
+        //     .explosions = {{3, 3}},
+        //     .scores = {{1, 42}}
+        // };
+        // serialize(game, buf3);
+        // print_streambuf(buf3);
+        // gui_socket.send_to(buf3.data(), gui_endpoint);
 
         // TEST 4
         // boost::asio::streambuf buf4;
@@ -222,22 +235,121 @@ int main(int argc, char *argv[]) {
         // gui_socket.send_to(buf4.data(), gui_endpoint);
 
         // TEST 5
-        // boost::asio::streambuf buf5;
         // uint8_t i_8 = 8;
         // uint16_t i_16 = 16;
         // uint32_t i_32 = 32;
-        // serialize(i_8, buf5);
-        // serialize(i_16, buf5);
-        // serialize(i_32, buf5);
+        // serialize(i_8, UDP_buffer);
+        // serialize(i_16, UDP_buffer);
+        // serialize(i_32, UDP_buffer);
 
-        // print_streambuf(buf5);
-        // auto reader = [&buf5](void *arg, size_t read_size) {
-        //     buf5.sgetn((char *) arg, read_size);
-        // };
+        // print_streambuf(UDP_buffer);
 
         // uint8_t i_8_des;
         // uint16_t i_16_des;
         // uint32_t i_32_des;
+
+        // deserialize(i_8_des, read_UDP);
+        // cout << "result 8 is: " << (int) i_8_des << "\n";
+
+        // deserialize(i_16_des, read_UDP);
+        // cout << "result 16 is: " << (int) i_16_des << "\n";
+
+        // deserialize(i_32_des, read_UDP);
+        // cout << "result 32 is: " << (int) i_32_des << "\n";
+
+
+        // TEST 6
+        // vector<uint8_t> vec_8 = {8, 88};
+        // serialize(vec_8, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // vector<string> vec = {"Ola", "Bart"};
+        // serialize(vec, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // vector<uint8_t> vec_8_des;
+        // deserialize(vec_8_des, read_UDP);
+        // for (auto elem : vec_8_des) cout << (int) elem << ",\t";
+        // cout << "\n";
+
+        // vector<string> vec_des;
+        // deserialize(vec_des, read_UDP);
+        // for (auto elem : vec_des) cout << elem << ",\t";
+        // cout << "\n";
+
+        // TEST 7
+        // string str = "Ola";
+        // serialize(str, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // string str_des;
+        // deserialize(str_des, read_UDP);
+        // cout << "result is: " << str_des << "\n";
+
+        // Direction direction = Direction::Up;
+        // serialize(direction, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // Direction direction_des;
+        // deserialize(direction_des, read_UDP);
+        // cout << "result is: " << (int) direction_des << "\n";
+
+        // TEST 8
+        // map<string, uint32_t> map_src = {{"Ola", 1}, {"Bart", 42}};
+        // serialize(map_src, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // map<string, uint32_t> map_des = {};
+        // deserialize(map_des, read_UDP);
+        // for (auto [key, value] : map_des) cout << "{ " << key << ", " << value << " }\t";
+        // cout << "\n";
+
+        // TEST 9
+        // variant<uint8_t, uint16_t> var1 = (uint8_t) 8;
+        // serialize(var1, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // variant<uint8_t, uint16_t> var1_des;
+        // deserialize(var1_des, read_UDP);
+        // cout << "result is: " << (int) get<uint8_t>(var1_des) << "\n";
+
+        // variant<string, Direction> var2 = "Ola";
+        // serialize(var2, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // variant<string, Direction> var2_des;
+        // deserialize(var2_des, read_UDP);
+        // cout << "result is: " << get<string>(var2_des) << "\n";
+
+        // variant<string, Direction> var3 = Direction::Up;
+        // serialize(var3, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // variant<string, Direction> var3_des;
+        // deserialize(var3_des, read_UDP);
+        // cout << "result is: " << (int) get<Direction>(var3_des) << "\n";
+
+        // TEST 10
+        // ClientMessageGui game = Game {
+        //     .server_name = "Hello, world!",
+        //     .size_x = 7,
+        //     .size_y = 7,
+        //     .game_length = 9,
+        //     .turn = 6,
+        //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+        //     .player_positions = {{1, {3, 4}}},
+        //     .blocks = {{3, 1}, {3, 2}, {3, 3}},
+        //     .bombs = {{{2, 1}, 1}, {{4, 1}, 1}},
+        //     .explosions = {{3, 5}},
+        //     .scores = {{1, 42}}
+        // };
+
+        // serialize(game, UDP_buffer);
+        // print_streambuf(UDP_buffer);
+
+        // ClientMessageGui game_des;
+        // deserialize(game_des, read_UDP);
+        // assert(game == game_des);
 
 
 

@@ -11,6 +11,7 @@ using namespace std;
 /* -------------------------------------------------------------------------
    General structures, enums and aliases
    ------------------------------------------------------------------------- */
+/* Declarations */
 enum class Direction : uint8_t;
 
 struct Position;
@@ -21,6 +22,7 @@ using PlayerId = uint8_t;
 using BombId = uint32_t;
 using Score = uint32_t;
 
+/* Definitions */
 enum class Direction : uint8_t {
     Up,
     Right,
@@ -46,11 +48,13 @@ struct Player {
 /* -------------------------------------------------------------------------
    Structures for communication [gui -> client] & [client -> server] 
    ------------------------------------------------------------------------- */
+/* Declarations */
 struct Join;
 struct PlaceBomb;
 struct PlaceBlock;
 struct Move;
 
+/* Definitions */
 struct Join {
     string name;
 };
@@ -66,6 +70,7 @@ struct Move {
 /* -------------------------------------------------------------------------
    Structures for communication [server -> client]
    ------------------------------------------------------------------------- */
+/* Declarations */
 struct Hello;
 struct AcceptedPlayer;
 struct GameStarted;
@@ -80,6 +85,7 @@ struct BlockPlaced;
 
 using Event = variant<BombPlaced, BombExploded, PlayerMoved, BlockPlaced>;
 
+/* Definitions */
 struct Hello {
     string server_name;
     uint8_t players_count;
@@ -131,9 +137,11 @@ struct BlockPlaced {
 /* -------------------------------------------------------------------------
    Structures for communication [client -> gui]
    ------------------------------------------------------------------------- */
+/* Declarations */
 struct Lobby;
 struct Game;
 
+/* Definitions */
 struct Lobby {
     string server_name;
     uint8_t players_count;
@@ -314,23 +322,91 @@ void deserialize(T &arg, void (*read)(void*, size_t)) {
 
 template <Enum T>
 void deserialize(T &arg, void (*read)(void*, size_t)) {
-    read(arg, sizeof(uint8_t));
+    read(&arg, sizeof(uint8_t));
 }
 
 template <Unsigned T>
 void deserialize(T &arg, void (*read)(void*, size_t)) {
     if constexpr(sizeof(T) == sizeof(uint8_t)) {
         read(&arg, sizeof(uint8_t));
+        return;
     }
     if constexpr(sizeof(T) == sizeof(uint16_t)) {
-        read(arg, sizeof(uint16_t));
+        read(&arg, sizeof(uint16_t));
         arg = ntohs(arg);
+        return;
     }
     if constexpr(sizeof(T) == sizeof(uint32_t)) {
-        read(arg, sizeof(uint32_t));
+        read(&arg, sizeof(uint32_t));
         arg = ntohl(arg);
+        return;
     }
     throw invalid_argument("unknown unsigned type\n");
+}
+
+template <class... Ts>
+void deserialize(variant<Ts...> &arg, void (*read)(void*, size_t)) {
+    uint8_t code;
+    deserialize(code, read);
+    if (code >= variant_size_v<variant<Ts...>>) {
+        throw invalid_argument("unknown variant type ID\n");
+    }
+    /* we need as many ifs as there are codes possible, here from 0 to 4 */
+    if (code == 0) {
+        variant_alternative_t<0, variant<Ts...>> alt;
+        deserialize(alt, read);
+        arg = alt;
+    }
+    if (code == 1) {
+        variant_alternative_t<1, variant<Ts...>> alt;
+        deserialize(alt, read);
+        arg = alt;
+    }
+    if (code == 2) {
+        variant_alternative_t<2, variant<Ts...>> alt;
+        deserialize(alt, read);
+        arg = alt;
+    }
+    // if (code == 3) {
+    //     variant_alternative_t<3, variant<Ts...>> alt;
+    //     deserialize(alt, read);
+    //     arg = alt;
+    // }
+    // if (code == 4) {
+    //     variant_alternative_t<4, variant<Ts...>> alt;
+    //     deserialize(alt, read);
+    //     arg = alt;
+    // }
+}
+
+template <class T>
+void deserialize(vector<T> &arg, void (*read)(void*, size_t)) {
+    uint32_t size;
+    deserialize(size, read);
+    arg.resize(size);
+    for (T &elem : arg) {
+        deserialize(elem, read);
+    }
+}
+
+template <class K, class V>
+void deserialize(map<K, V> &map, void (*read)(void*, size_t)) {
+    uint32_t size;
+    deserialize(size, read);
+    while (size--) {
+        K key;
+        V value;
+        deserialize(key, read);
+        deserialize(value, read);
+        map.insert({key, value});
+    }
+}
+
+void deserialize(string &arg, void (*read)(void*, size_t)) {
+    uint8_t size;
+    deserialize(size, read);
+    arg.resize(size);
+    read(arg.data(), size);
 }
 
 // template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
