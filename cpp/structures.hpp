@@ -33,16 +33,19 @@ enum class Direction : uint8_t {
 struct Position {
     uint16_t x;
     uint16_t y;
+    bool operator==(const Position &other) const = default;
 };
 
 struct Bomb {
     Position position;
     uint16_t timer;
+    bool operator==(const Bomb &other) const = default;
 };
 
 struct Player {
     string name;
     string address;
+    bool operator==(const Player &other) const = default;
 };
 
 /* -------------------------------------------------------------------------
@@ -165,6 +168,7 @@ struct Game {
     vector<Bomb> bombs;
     vector<Position> explosions;
     map<PlayerId, Score> scores;
+    bool operator==(const Game &other) const = default;
 };
 
 /* -------------------------------------------------------------------------
@@ -317,7 +321,7 @@ void deserialize(string &arg, void (*read)(void*, size_t));
 /* Definitions */
 template <Aggregate T>
 void deserialize(T &arg, void (*read)(void*, size_t)) {
-    boost::pfr::for_each_field(arg, [&read](auto const &field) { deserialize(field, read); });
+    boost::pfr::for_each_field(arg, [&read](auto &field) { deserialize(field, read); });
 }
 
 template <Enum T>
@@ -352,31 +356,44 @@ void deserialize(variant<Ts...> &arg, void (*read)(void*, size_t)) {
         throw invalid_argument("unknown variant type ID\n");
     }
     /* we need as many ifs as there are codes possible, here from 0 to 4 */
-    if (code == 0) {
+    if (code == 0) { // All variants have defined code 0
         variant_alternative_t<0, variant<Ts...>> alt;
         deserialize(alt, read);
         arg = alt;
     }
-    if (code == 1) {
+    if (code == 1) { // All variants have defined code 1
         variant_alternative_t<1, variant<Ts...>> alt;
         deserialize(alt, read);
         arg = alt;
     }
-    if (code == 2) {
-        variant_alternative_t<2, variant<Ts...>> alt;
-        deserialize(alt, read);
-        arg = alt;
+    if constexpr(is_same_v<variant<Ts...>, ClientMessageServer> ||
+                 is_same_v<variant<Ts...>, ServerMessageClient> ||
+                 is_same_v<variant<Ts...>, GuiMessageClient> ||
+                 is_same_v<variant<Ts...>, Event>
+    ) {
+        if (code == 2) {
+            variant_alternative_t<2, variant<Ts...>> alt;
+            deserialize(alt, read);
+            arg = alt;
+        }
     }
-    // if (code == 3) {
-    //     variant_alternative_t<3, variant<Ts...>> alt;
-    //     deserialize(alt, read);
-    //     arg = alt;
-    // }
-    // if (code == 4) {
-    //     variant_alternative_t<4, variant<Ts...>> alt;
-    //     deserialize(alt, read);
-    //     arg = alt;
-    // }
+    if constexpr(is_same_v<variant<Ts...>, ClientMessageServer> ||
+                 is_same_v<variant<Ts...>, ServerMessageClient> ||
+                 is_same_v<variant<Ts...>, Event>
+    ) {
+        if (code == 3) {
+            variant_alternative_t<3, variant<Ts...>> alt;
+            deserialize(alt, read);
+            arg = alt;
+        }
+    }
+    if constexpr(is_same_v<variant<Ts...>, ServerMessageClient>) {
+        if (code == 4) {
+            variant_alternative_t<4, variant<Ts...>> alt;
+            deserialize(alt, read);
+            arg = alt;
+        }
+    }
 }
 
 template <class T>

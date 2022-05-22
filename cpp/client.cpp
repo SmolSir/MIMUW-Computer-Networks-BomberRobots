@@ -23,6 +23,8 @@ struct sockaddr_str {
     string port;
 };
 
+boost::asio::streambuf UDP_buffer;
+
 string make_string(boost::asio::streambuf &streambuf) {
     return {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
 }
@@ -93,24 +95,6 @@ bool process_command_line(int argc, char** argv,
     return true;
 }
 
-awaitable<void> gui_listener() {
-    for (int i = 0; i < 10; i++) {
-        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
-        co_await timer.async_wait(use_awaitable);
-        cout << "gui_listener" << endl;
-    }
-}
-
-awaitable<void> server_listener() {
-    for (int i = 0; i < 4; i++) {
-        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(5));
-        co_await timer.async_wait(use_awaitable);
-        cout << "server_listener" << endl;
-    }
-}
-
-boost::asio::streambuf UDP_buffer;
-
 void read_UDP(void *arg, size_t size) {
     if (UDP_buffer.size() < size) {
         throw length_error("unexpected EOF in read_UDP from UDP_buffer\n");
@@ -120,6 +104,50 @@ void read_UDP(void *arg, size_t size) {
 
 void read_TCP(void *arg, size_t size) {
 
+}
+
+awaitable<void> gui_listener(boost::asio::io_context &io_context, sockaddr_str &gui, string &client_port) {
+    // for (int i = 0; i < 10; i++) {
+    //     boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
+    //     co_await timer.async_wait(use_awaitable);
+    //     cout << "gui_listener" << endl;
+    // }
+    udp::resolver resolver(io_context);
+    udp::endpoint gui_endpoint = *resolver.resolve(gui.addr, gui.port).begin();
+    udp::socket socket(io_context);
+    socket.open(gui_endpoint.protocol());
+
+    ClientMessageGui game = Game {
+        .server_name = "Hello, world!",
+        .size_x = 10,
+        .size_y = 10,
+        .game_length = 100,
+        .turn = 5,
+        .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+        .player_positions = {{1, {5, 5}}},
+        .blocks = {{1, 1}},
+        .bombs = {{{2, 2}, 100}},
+        .explosions = {{3, 3}},
+        .scores = {{1, 42}}
+    };
+
+    serialize(game, UDP_buffer);
+    size_t send_size = co_await socket.async_send_to(UDP_buffer.data(), gui_endpoint, use_awaitable);
+    UDP_buffer.consume(send_size);
+
+    for (int i = 0; i < 10; i++) {
+        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
+        co_await timer.async_wait(use_awaitable);
+        cout << "gui_listener" << endl;
+    }
+}
+
+awaitable<void> server_listener(boost::asio::io_context &io_context) {
+    for (int i = 0; i < 4; i++) {
+        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(5));
+        co_await timer.async_wait(use_awaitable);
+        cout << "server_listener" << endl;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -145,10 +173,10 @@ int main(int argc, char *argv[]) {
     try {
         boost::asio::io_context io_context;
         
-        udp::resolver gui_resolver(io_context);
-        udp::endpoint gui_endpoint = *gui_resolver.resolve(gui.addr, gui.port).begin();
-        udp::socket gui_socket(io_context);
-        gui_socket.open(gui_endpoint.protocol());
+        // udp::resolver gui_resolver(io_context);
+        // udp::endpoint gui_endpoint = *gui_resolver.resolve(gui.addr, gui.port).begin();
+        // udp::socket gui_socket(io_context);
+        // gui_socket.open(gui_endpoint.protocol());
 
         tcp::resolver srv_resolver(io_context);
         tcp::resolver::results_type srv_endpoints = srv_resolver.resolve(srv.addr, srv.port);
@@ -157,6 +185,25 @@ int main(int argc, char *argv[]) {
 
         boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ io_context.stop(); });
+
+
+
+        co_spawn(io_context, gui_listener(io_context, gui, port), detached);
+        co_spawn(io_context, server_listener(io_context), detached);
+
+        io_context.run();
+    }
+    catch (exception &e) {
+        cerr << "error: " << e.what() << "\n";
+        return 1;
+    }
+    catch(...) {
+        cerr << "Exception of unknown type!\n";
+        return 1;
+    }
+
+    return 0;
+}
 
         // TEST 1
         // boost::asio::streambuf buf;
@@ -321,13 +368,13 @@ int main(int argc, char *argv[]) {
         // deserialize(var2_des, read_UDP);
         // cout << "result is: " << get<string>(var2_des) << "\n";
 
-        // variant<string, Direction> var3 = Direction::Up;
+        // GuiMessageClient var3 = (Move) Direction::Down;
         // serialize(var3, UDP_buffer);
         // print_streambuf(UDP_buffer);
 
-        // variant<string, Direction> var3_des;
+        // GuiMessageClient var3_des;
         // deserialize(var3_des, read_UDP);
-        // cout << "result is: " << (int) get<Direction>(var3_des) << "\n";
+        // cout << "result is: " << (int) get<2>(var3_des).direction << "\n";
 
         // TEST 10
         // ClientMessageGui game = Game {
@@ -349,23 +396,6 @@ int main(int argc, char *argv[]) {
 
         // ClientMessageGui game_des;
         // deserialize(game_des, read_UDP);
-        // assert(game == game_des);
+        // assert(get<Game>(game) == get<Game>(game_des));
 
-
-
-        // co_spawn(io_context, gui_listener(), detached);
-        // co_spawn(io_context, server_listener(), detached);
-
-        io_context.run();
-    }
-    catch (exception &e) {
-        cerr << "error: " << e.what() << "\n";
-        return 1;
-    }
-    catch(...) {
-        cerr << "Exception of unknown type!\n";
-        return 1;
-    }
-
-    return 0;
-}
+        // cout << "success!!!\n";
