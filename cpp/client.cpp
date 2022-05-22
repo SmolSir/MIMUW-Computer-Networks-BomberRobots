@@ -23,7 +23,14 @@ struct sockaddr_str {
     string port;
 };
 
+/* Global variables for less argument passing */
+po::variables_map program_params;
 boost::asio::streambuf UDP_buffer;
+
+sockaddr_str gui;
+sockaddr_str server;
+string player_name;
+string port;
 
 string make_string(boost::asio::streambuf &streambuf) {
     return {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
@@ -49,35 +56,29 @@ sockaddr_str get_sockaddr_str(string &str) {
     return addr_str;
 }
 
-bool process_command_line(int argc, char** argv, 
-                          sockaddr_str &gui, 
-                          sockaddr_str &srv, 
-                          string &name, 
-                          string &port) 
-{
-    string gui_str;
-    string srv_str;
+bool process_command_line(int argc, char** argv) {
+    string gui_sockaddr_str;
+    string server_sockaddr_str;
     uint16_t port_u16;
 
     try {
         po::options_description desc("Allowed options");
         desc.add_options()
-            ("gui-address,d", po::value<string>(&gui_str)->required(), "gui address:port")
+            ("gui-address,d", po::value<string>(&gui_sockaddr_str)->required(), "gui address:port")
             ("help,h", "help message")
-            ("player-name,n", po::value<string>(&name)->required(), "player name")
+            ("player-name,n", po::value<string>(&player_name)->required(), "player name")
             ("port,p", po::value<uint16_t>(&port_u16)->required(), "port for comms from gui")
-            ("server-address,s", po::value<string>(&srv_str)->required(), "server address:port")
+            ("server-address,s", po::value<string>(&server_sockaddr_str)->required(), "server address:port")
         ;
 
-        po::variables_map vm;
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+        po::store(po::parse_command_line(argc, argv, desc), program_params);
 
-        if (vm.count("help")) {
+        if (program_params.count("help")) {
             cout << desc << "\n";
             return false;
         }
 
-        po::notify(vm);
+        po::notify(program_params);
     }
     catch(exception &e) {
         cerr << "error: " << e.what() << "\n";
@@ -88,8 +89,8 @@ bool process_command_line(int argc, char** argv,
         return false;
     }
 
-    gui = get_sockaddr_str(gui_str);
-    srv = get_sockaddr_str(srv_str);
+    gui = get_sockaddr_str(gui_sockaddr_str);
+    server = get_sockaddr_str(server_sockaddr_str);
     port = to_string(port_u16);
 
     return true;
@@ -106,17 +107,21 @@ void read_TCP(void *arg, size_t size) {
 
 }
 
-awaitable<void> gui_listener(boost::asio::io_context &io_context, sockaddr_str &gui, string &client_port) {
-    // for (int i = 0; i < 10; i++) {
-    //     boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
-    //     co_await timer.async_wait(use_awaitable);
-    //     cout << "gui_listener" << endl;
-    // }
-    udp::resolver resolver(io_context);
-    udp::endpoint gui_endpoint = *resolver.resolve(gui.addr, gui.port).begin();
-    udp::socket socket(io_context);
-    socket.open(gui_endpoint.protocol());
+awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {    
+    
+    cout << "after bind client_endpoint\n";
 
+    boost::array<char, 8> recv_buffer;
+    size_t receive_size = co_await client_socket.async_receive(boost::asio::buffer(recv_buffer), use_awaitable);
+
+    for (int i = 0; i < 10; i++) {
+        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(1));
+        co_await timer.async_wait(use_awaitable);
+        cout << "gui_listener" << endl;
+    }
+}
+
+awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_socket, udp::endpoint &gui_endpoint) {
     ClientMessageGui game = Game {
         .server_name = "Hello, world!",
         .size_x = 10,
@@ -132,19 +137,11 @@ awaitable<void> gui_listener(boost::asio::io_context &io_context, sockaddr_str &
     };
 
     serialize(game, UDP_buffer);
-    size_t send_size = co_await socket.async_send_to(UDP_buffer.data(), gui_endpoint, use_awaitable);
+    size_t send_size = co_await gui_socket.async_send_to(UDP_buffer.data(), gui_endpoint, use_awaitable);
     UDP_buffer.consume(send_size);
 
-    for (int i = 0; i < 10; i++) {
-        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
-        co_await timer.async_wait(use_awaitable);
-        cout << "gui_listener" << endl;
-    }
-}
-
-awaitable<void> server_listener(boost::asio::io_context &io_context) {
     for (int i = 0; i < 4; i++) {
-        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(5));
+        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
         co_await timer.async_wait(use_awaitable);
         cout << "server_listener" << endl;
     }
@@ -152,44 +149,45 @@ awaitable<void> server_listener(boost::asio::io_context &io_context) {
 
 int main(int argc, char *argv[]) {
 
-    sockaddr_str gui;
-    sockaddr_str srv;
-    string player_name;
-    string port;
-
     /* parsing command line parameters */
-    bool parsing_result = process_command_line(argc, argv, gui, srv, player_name, port);
+    bool parsing_result = process_command_line(argc, argv);
 
     if (!parsing_result) {
         cerr << "Failed to parse parameters.\n";
         return 1;
     }
 
-    cout << gui.addr << ":" << gui.port << "    "
-         << srv.addr << ":" << srv.port << "    "
-         << player_name << "    "
+    cout << gui.addr << " : " << gui.port << "\t"
+         << server.addr << " : " << server.port << "\t"
+         << player_name << "\t"
          << port << "\n";
 
     try {
         boost::asio::io_context io_context;
         
-        // udp::resolver gui_resolver(io_context);
-        // udp::endpoint gui_endpoint = *gui_resolver.resolve(gui.addr, gui.port).begin();
-        // udp::socket gui_socket(io_context);
-        // gui_socket.open(gui_endpoint.protocol());
+        /* Prepare socket for receiving data from gui */
+        udp::socket client_socket(io_context);
+        client_socket.open(boost::asio::ip::udp::v6());
+        client_socket.bind({boost::asio::ip::udp::v6(), program_params["port"].as<uint16_t>()});
 
-        tcp::resolver srv_resolver(io_context);
-        tcp::resolver::results_type srv_endpoints = srv_resolver.resolve(srv.addr, srv.port);
-        tcp::socket srv_socket(io_context);
-//        boost::asio::connect(srv_socket, srv_endpoints);
+        /* Prepare socket & endpoint for sending data to gui */
+        udp::resolver gui_resolver(io_context);
+        udp::endpoint gui_endpoint = *gui_resolver.resolve(gui.addr, gui.port).begin();
+        udp::socket gui_socket(io_context);
+        gui_socket.open(gui_endpoint.protocol());
+
+        /* Prepare socket for exchanging data with server */
+        tcp::resolver server_resolver(io_context);
+        tcp::resolver::results_type server_endpoints = server_resolver.resolve(server.addr, server.port);
+        tcp::socket server_socket(io_context);
+        boost::asio::connect(server_socket, server_endpoints);
+        server_socket.set_option(tcp::no_delay(true)); // set the TCP_NODELAY flag
 
         boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ io_context.stop(); });
 
-
-
-        co_spawn(io_context, gui_listener(io_context, gui, port), detached);
-        co_spawn(io_context, server_listener(io_context), detached);
+        co_spawn(io_context, gui_listener(server_socket, client_socket), detached);
+        co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), detached);
 
         io_context.run();
     }
