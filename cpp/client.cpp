@@ -2,8 +2,6 @@
 
 #include "structures.hpp"
 
-using boost::asio::awaitable;
-using boost::asio::use_awaitable;
 using boost::asio::co_spawn;
 using boost::asio::detached;
 using boost::asio::ip::udp;
@@ -11,11 +9,6 @@ using boost::asio::ip::tcp;
 
 namespace po = boost::program_options;
 namespace this_coro = boost::asio::this_coro;
-
-#if defined(BOOST_ASIO_ENABLE_HANDLER_TRACKING)
-# define use_awaitable \
-  boost::asio::use_awaitable_t(__FILE__, __LINE__, __PRETTY_FUNCTION__)
-#endif
 
 #define MAX_UDP_DATA 65527 // because of IPv6
 
@@ -98,18 +91,46 @@ bool process_command_line(int argc, char** argv) {
     return true;
 }
 
-void read_UDP(void *arg, size_t size) {
-    if (UDP_buffer.size() < size) {
-        throw length_error("unexpected EOF in read_UDP from UDP_buffer\n");
-    }
-    UDP_buffer.sgetn((char *) arg, size);
-}
+// awaitable<void> read_UDP(void *arg, size_t size) {
+//     if (UDP_buffer.size() < size) {
+//         throw length_error("unexpected EOF in read_UDP from UDP_buffer\n");
+//     }
+//     UDP_buffer.sgetn((char *) arg, size);
+//     co_return;
+// }
 
 void read_TCP(void *arg, size_t size) {
 
 }
 
-awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {    
+awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {
+    auto read_UDP = [&client_socket](void* arg, size_t size) -> awaitable<void> {
+        co_return;
+    };
+    //TEST 10
+    ClientMessageGui game = Game {
+        .server_name = "Hello, world!",
+        .size_x = 7,
+        .size_y = 7,
+        .game_length = 9,
+        .turn = 6,
+        .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
+        .player_positions = {{1, {3, 4}}},
+        .blocks = {{3, 1}, {3, 2}, {3, 3}},
+        .bombs = {{{2, 1}, 1}, {{4, 1}, 1}},
+        .explosions = {{3, 5}},
+        .scores = {{1, 42}}
+    };
+
+    serialize(game, UDP_buffer);
+    print_streambuf(UDP_buffer);
+
+    ClientMessageGui game_des;
+    co_await deserialize(game_des, read_UDP);
+    assert(get<Game>(game) == get<Game>(game_des));
+    cout << "SUCCESFULLY TESTED\n";
+    co_return;
+
     for (;;) {
         boost::asio::streambuf receive_streambuf;
         boost::asio::streambuf::mutable_buffers_type bufs = receive_streambuf.prepare(MAX_UDP_DATA);
@@ -192,7 +213,7 @@ int main(int argc, char *argv[]) {
         signals.async_wait([&](auto, auto){ io_context.stop(); });
 
         co_spawn(io_context, gui_listener(server_socket, client_socket), detached);
-        co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), detached);
+        // co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), detached);
 
         io_context.run();
     }
@@ -360,15 +381,15 @@ int main(int argc, char *argv[]) {
         // print_streambuf(UDP_buffer);
 
         // variant<uint8_t, uint16_t> var1_des;
-        // deserialize(var1_des, read_UDP);
-        // cout << "result is: " << (int) get<uint8_t>(var1_des) << "\n";
+        // co_await deserialize(var1_des, read_UDP);
+        // cout << "\nresult is: " << (int) get<uint8_t>(var1_des) << "\n\n\n";
 
         // variant<string, Direction> var2 = "Ola";
         // serialize(var2, UDP_buffer);
         // print_streambuf(UDP_buffer);
 
         // variant<string, Direction> var2_des;
-        // deserialize(var2_des, read_UDP);
+        // co_await deserialize(var2_des, read_UDP);
         // cout << "result is: " << get<string>(var2_des) << "\n";
 
         // GuiMessageClient var3 = (Move) Direction::Down;
@@ -376,29 +397,7 @@ int main(int argc, char *argv[]) {
         // print_streambuf(UDP_buffer);
 
         // GuiMessageClient var3_des;
-        // deserialize(var3_des, read_UDP);
+        // co_await deserialize(var3_des, read_UDP);
         // cout << "result is: " << (int) get<2>(var3_des).direction << "\n";
 
-        // TEST 10
-        // ClientMessageGui game = Game {
-        //     .server_name = "Hello, world!",
-        //     .size_x = 7,
-        //     .size_y = 7,
-        //     .game_length = 9,
-        //     .turn = 6,
-        //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
-        //     .player_positions = {{1, {3, 4}}},
-        //     .blocks = {{3, 1}, {3, 2}, {3, 3}},
-        //     .bombs = {{{2, 1}, 1}, {{4, 1}, 1}},
-        //     .explosions = {{3, 5}},
-        //     .scores = {{1, 42}}
-        // };
 
-        // serialize(game, UDP_buffer);
-        // print_streambuf(UDP_buffer);
-
-        // ClientMessageGui game_des;
-        // deserialize(game_des, read_UDP);
-        // assert(get<Game>(game) == get<Game>(game_des));
-
-        // cout << "success!!!\n";
