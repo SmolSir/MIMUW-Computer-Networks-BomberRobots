@@ -21,7 +21,7 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 /* structure storing data about game status */
 struct clientStatus {
     bool in_lobby = false;
-    bool in_game = false;
+    bool in_game = true;
     bool join_request_sent = false;
 };
 /* structure storing address and port as strings */
@@ -110,18 +110,6 @@ bool process_command_line(int argc, char** argv) {
     return true;
 }
 
-// awaitable<void> read_UDP(void *arg, size_t size) {
-//     if (UDP_buffer.size() < size) {
-//         throw length_error("unexpected EOF in read_UDP from UDP_buffer\n");
-//     }
-//     UDP_buffer.sgetn((char *) arg, size);
-//     co_return;
-// }
-
-void read_TCP(void *arg, size_t size) {
-
-}
-
 awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {
     boost::asio::streambuf read_streambuf;
     boost::asio::streambuf send_streambuf;
@@ -158,7 +146,7 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
             if (status.in_lobby && !status.join_request_sent) {
                 ClientMessageServer join = Join { .name = player_name };
                 serialize(join, send_streambuf);
-                // TODO send to server
+                co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
                 status.join_request_sent = true;
             }
         }
@@ -170,22 +158,21 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
             ClientMessageServer client_message;
             if (status.in_game) {
                 visit(overloaded {
-                    [&client_message](PlaceBomb message) {
+                    [&client_message](PlaceBomb) {
+                        cout << "received PlaceBomb\n";
                         client_message = PlaceBomb { };
-
                     },
-                    [&client_message](PlaceBlock message) {
+                    [&client_message](PlaceBlock) {
+                        cout << "received PlaceBlock\n";
                         client_message = PlaceBlock { };
                     },
                     [&client_message](Move message) {
+                        cout << "received Move: " << (int) message.direction << "\n";
                         client_message = Move { .direction = message.direction };
                     }
                 }, gui_message);
                 serialize(client_message, send_streambuf);
-            }
-
-            if (send_streambuf.size()) {
-                // TODO send to server
+                co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
             }
         }
         catch(exception &e) {
