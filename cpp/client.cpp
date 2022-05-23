@@ -17,6 +17,8 @@ namespace this_coro = boost::asio::this_coro;
   boost::asio::use_awaitable_t(__FILE__, __LINE__, __PRETTY_FUNCTION__)
 #endif
 
+#define MAX_UDP_DATA 65527 // because of IPv6
+
 /* structure storing address and port as strings */
 struct sockaddr_str {
     string addr;
@@ -108,17 +110,20 @@ void read_TCP(void *arg, size_t size) {
 }
 
 awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {    
-    
-    cout << "after bind client_endpoint\n";
+    for (;;) {
+        boost::asio::streambuf receive_streambuf;
+        boost::asio::streambuf::mutable_buffers_type bufs = receive_streambuf.prepare(MAX_UDP_DATA);
 
-    boost::array<char, 8> recv_buffer;
-    size_t receive_size = co_await client_socket.async_receive(boost::asio::buffer(recv_buffer), use_awaitable);
-
-    for (int i = 0; i < 10; i++) {
-        boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(1));
-        co_await timer.async_wait(use_awaitable);
-        cout << "gui_listener" << endl;
+        size_t receive_size = co_await client_socket.async_receive(bufs, use_awaitable);
+        receive_streambuf.commit(receive_size);
+        cout << "size is: " << receive_streambuf.size() << "\n";
     }
+
+    // for (int i = 0; i < 10; i++) {
+    //     boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(1));
+    //     co_await timer.async_wait(use_awaitable);
+    //     cout << "gui_listener" << endl;
+    // }
 }
 
 awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_socket, udp::endpoint &gui_endpoint) {
