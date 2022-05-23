@@ -215,6 +215,9 @@ void serialize(variant<Ts...> const &arg, boost::asio::streambuf &sb);
 template <class T>
 void serialize(vector<T> const &vec, boost::asio::streambuf &sb);
 
+template <class T>
+void serialize(set<T> const &st, boost::asio::streambuf &sb);
+
 template <class K, class V>
 void serialize(map<K, V> const &map, boost::asio::streambuf &sb);
 
@@ -278,6 +281,17 @@ void serialize(vector<T> const &vec, boost::asio::streambuf &sb) {
     }
 }
 
+template <class T>
+void serialize(set<T> const &st, boost::asio::streambuf &sb) {
+    cout << "set specialization!\nsize is: " << st.size() << "\n";
+    uint32_t st_size = (uint32_t) st.size();
+    uint32_t net_st_size = htonl(st_size);
+    sb.sputn((const char *) &net_st_size, sizeof(net_st_size));
+    for (T const &elem : st) {
+        serialize(elem, sb);
+    }
+}
+
 template <class K, class V>
 void serialize(map<K, V> const &map, boost::asio::streambuf &sb) {
     cout << "map specialization!\nsize is: " << map.size() << "\n";
@@ -305,43 +319,47 @@ void serialize(string const &arg, boost::asio::streambuf &sb) {
    Template functions for deserializing all program structures
    ------------------------------------------------------------------------- */
 /* Declarations */
-template <Aggregate T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t));
+template <Aggregate T, typename F>
+awaitable<void> deserialize(T &arg, F &read);
 
-template <Enum T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t));
+template <Enum T, typename F>
+awaitable<void> deserialize(T &arg, F &read);
 
-template <Unsigned T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t));
+template <Unsigned T, typename F>
+awaitable<void> deserialize(T &arg, F &read);
 
-template <class... Ts>
-awaitable<void> deserialize(variant<Ts...> &arg, awaitable<void> (*read)(void*, size_t));
+template <class... Ts, typename F>
+awaitable<void> deserialize(variant<Ts...> &arg, F &read);
 
-template <class T>
-awaitable<void> deserialize(vector<T> &vec, awaitable<void> (*read)(void*, size_t));
+template <class T, typename F>
+awaitable<void> deserialize(vector<T> &vec, F &read);
 
-template <class K, class V>
-awaitable<void> deserialize(map<K, V> &map, awaitable<void> (*read)(void*, size_t));
+template <class T, typename F>
+awaitable<void> deserialize(set<T> &st, F &read);
 
-awaitable<void> deserialize(string &arg, awaitable<void> (*read)(void*, size_t));
+template <class K, class V, typename F>
+awaitable<void> deserialize(map<K, V> &map, F &read);
+
+template <typename F>
+awaitable<void> deserialize(string &arg, F &read);
 
 /* Definitions */
-template <Aggregate T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t)) {
+template <Aggregate T, typename F>
+awaitable<void> deserialize(T &arg, F &read) {
     co_await std::apply([&read] (auto &... fields) -> awaitable<void> {
         (co_await deserialize(fields, read), ...);
     }, boost::pfr::structure_tie(arg));
     co_return;
 }
 
-template <Enum T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t)) {
+template <Enum T, typename F>
+awaitable<void> deserialize(T &arg, F &read) {
     co_await read(&arg, sizeof(uint8_t));
     co_return;
 }
 
-template <Unsigned T>
-awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t)) {
+template <Unsigned T, typename F>
+awaitable<void> deserialize(T &arg, F &read) {
     if constexpr(sizeof(T) == sizeof(uint8_t)) {
         co_await read(&arg, sizeof(uint8_t));
         co_return;
@@ -359,8 +377,8 @@ awaitable<void> deserialize(T &arg, awaitable<void> (*read)(void*, size_t)) {
     throw invalid_argument("unknown unsigned type\n");
 }
 
-template <class... Ts>
-awaitable<void> deserialize(variant<Ts...> &arg, awaitable<void> (*read)(void*, size_t)) {
+template <class... Ts, typename F>
+awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
     uint8_t code;
     co_await deserialize(code, read);
     cout << "variant deserialize code is: " << (int) code << "\n";
@@ -409,19 +427,31 @@ awaitable<void> deserialize(variant<Ts...> &arg, awaitable<void> (*read)(void*, 
     co_return;
 }
 
-template <class T>
-awaitable<void> deserialize(vector<T> &arg, awaitable<void> (*read)(void*, size_t)) {
+template <class T, typename F>
+awaitable<void> deserialize(vector<T> &vec, F &read) {
     uint32_t size;
     co_await deserialize(size, read);
-    arg.resize(size);
-    for (T &elem : arg) {
+    vec.resize(size);
+    for (T &elem : vec) {
         co_await deserialize(elem, read);
     }
     co_return;
 }
 
-template <class K, class V>
-awaitable<void> deserialize(map<K, V> &map, awaitable<void> (*read)(void*, size_t)) {
+template <class T, typename F>
+awaitable<void> deserialize(set<T> &st, F &read) {
+    uint32_t size;
+    co_await deserialize(size, read);
+    while (size--) {
+        T elem;
+        co_await deserialize(elem, read);
+        st.insert(elem);
+    }
+}
+
+
+template <class K, class V, typename F>
+awaitable<void> deserialize(map<K, V> &map, F &read) {
     uint32_t size;
     co_await deserialize(size, read);
     while (size--) {
@@ -434,12 +464,11 @@ awaitable<void> deserialize(map<K, V> &map, awaitable<void> (*read)(void*, size_
     co_return;
 }
 
-awaitable<void> deserialize(string &arg, awaitable<void> (*read)(void*, size_t)) {
+template <typename F>
+awaitable<void> deserialize(string &arg, F &read) {
     uint8_t size;
     co_await deserialize(size, read);
     arg.resize(size);
     co_await read(arg.data(), size);
     co_return;
 }
-
-// template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
