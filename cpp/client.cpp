@@ -38,6 +38,7 @@ po::variables_map program_params;
 boost::asio::streambuf UDP_buffer;
 
 clientStatus status;
+Hello settings;
 Lobby lobby;
 Game game;
 
@@ -110,20 +111,20 @@ bool process_command_line(int argc, char** argv) {
     return true;
 }
 
-void setup_client(Hello &hello) {
-    lobby.server_name = hello.server_name;
-    lobby.players_count = hello.players_count;
-    lobby.size_x = hello.size_x;
-    lobby.size_y = hello.size_y;
-    lobby.game_length = hello.game_length;
-    lobby.explosion_radius = hello.explosion_radius;
-    lobby.bomb_timer = hello.bomb_timer;
+void setup_client() {
+    lobby.server_name = settings.server_name;
+    lobby.players_count = settings.players_count;
+    lobby.size_x = settings.size_x;
+    lobby.size_y = settings.size_y;
+    lobby.game_length = settings.game_length;
+    lobby.explosion_radius = settings.explosion_radius;
+    lobby.bomb_timer = settings.bomb_timer;
     lobby.players = { };
 
-    game.server_name = hello.server_name;
-    game.size_x = hello.size_x;
-    game.size_y = hello.size_y;
-    game.game_length = hello.game_length;
+    game.server_name = settings.server_name;
+    game.size_x = settings.size_x;
+    game.size_y = settings.size_y;
+    game.game_length = settings.game_length;
     game.turn = 0;
     game.players = { };
     game.player_positions = { };
@@ -252,14 +253,15 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
         }
 
         ClientMessageGui client_message;
-        bool empty_message = true;
+        bool send_message = false;
         visit(overloaded {
             [&](Hello message) {
                 cout << "\n*** received Hello over TCP ***\n";
                 if (!status.in_lobby && !status.in_game) {
-                    setup_client(message);
+                    settings = message;
+                    setup_client();
                     client_message = lobby;
-                    empty_message = false;
+                    send_message = true;
                     status.in_lobby = true;
                 }
             },
@@ -268,7 +270,7 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 if (status.in_lobby) {
                     accept_player(message);
                     client_message = lobby;
-                    empty_message = false;
+                    send_message = true;
                 }
             },
             [&](GameStarted message) {
@@ -278,22 +280,31 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                         AcceptedPlayer new_player = {id, player};
                         accept_player(new_player);
                     }
-                    client_message = game;
-                    empty_message = false;
                     status.in_lobby = false;
                     status.in_game = true;
                 }
             },
             [&](Turn message) {
                 cout << "\n*** received Turn over TCP ***\n";
+                if (status.in_game) {
+
+                }
             },
             [&](GameEnded message) {
                 cout << "\n*** received GameEnded over TCP ***\n";
+                if (status.in_game) {
+                    setup_client();
+                    client_message = lobby;
+                    send_message = true;
+                    status.in_lobby = true;
+                    status.in_game = false;
+                    status.join_request_sent = false; // to allow client to join again
+                }
             }
         }, server_message);
 
         try {
-            if (!empty_message) {
+            if (send_message) {
                 serialize(client_message, send_streambuf);
                 co_await gui_socket.async_send_to(send_streambuf.data(), gui_endpoint, use_awaitable);
             }
@@ -305,29 +316,6 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
     }
 
     co_return;
-    // ClientMessageGui game = Game {
-    //     .server_name = "Hello, world!",
-    //     .size_x = 10,
-    //     .size_y = 10,
-    //     .game_length = 100,
-    //     .turn = 5,
-    //     .players = {{1, {"SmolSir", "127.0.0.1:10022"}}},
-    //     .player_positions = {{1, {5, 5}}},
-    //     .blocks = {{1, 1}},
-    //     .bombs = {{{2, 2}, 100}},
-    //     .explosions = {{3, 3}},
-    //     .scores = {{1, 42}}
-    // };
-
-    // serialize(game, UDP_buffer);
-    // size_t send_size = co_await gui_socket.async_send_to(UDP_buffer.data(), gui_endpoint, use_awaitable);
-    // UDP_buffer.consume(send_size);
-
-    // for (int i = 0; i < 4; i++) {
-    //     boost::asio::deadline_timer timer(co_await boost::asio::this_coro::executor, boost::posix_time::seconds(2));
-    //     co_await timer.async_wait(use_awaitable);
-    //     cout << "server_listener" << endl;
-    // }
 }
 
 int main(int argc, char *argv[]) {
