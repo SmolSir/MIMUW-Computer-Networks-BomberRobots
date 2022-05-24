@@ -239,19 +239,19 @@ void serialize(T const &arg, boost::asio::streambuf &sb) {
 
 template <Unsigned T>
 void serialize(T const &arg, boost::asio::streambuf &sb) {
-    if constexpr(sizeof(T) == sizeof(uint8_t)) {
+    if constexpr (sizeof(T) == sizeof(uint8_t)) {
         // cout << "uint8_t specialization!\nvalue is: " << (int) arg << "\n";
         uint8_t net_arg = arg;
         sb.sputn((const char *) &net_arg, sizeof(net_arg));
         return;
     }
-    if constexpr(sizeof(T) == sizeof(uint16_t)) {
+    if constexpr (sizeof(T) == sizeof(uint16_t)) {
         // cout << "uint16_t specialization!\nvalue is: " << arg << "\n";
         uint16_t net_arg = htons(arg);
         sb.sputn((const char *) &net_arg, sizeof(net_arg));
         return;
     }
-    if constexpr(sizeof(T) == sizeof(uint32_t)) {
+    if constexpr (sizeof(T) == sizeof(uint32_t)) {
         // cout << "uint32_t specialization!\nvalue is: " << arg << "\n";
         uint32_t net_arg = htonl(arg);
         sb.sputn((const char *) &net_arg, sizeof(net_arg));
@@ -346,6 +346,7 @@ awaitable<void> deserialize(string &arg, F &read);
 /* Definitions */
 template <Aggregate T, typename F>
 awaitable<void> deserialize(T &arg, F &read) {
+    cout << "Aggregate deserialization...\n";
     co_await std::apply([&read] (auto &... fields) -> awaitable<void> {
         (co_await deserialize(fields, read), ...);
     }, boost::pfr::structure_tie(arg));
@@ -354,31 +355,38 @@ awaitable<void> deserialize(T &arg, F &read) {
 
 template <Enum T, typename F>
 awaitable<void> deserialize(T &arg, F &read) {
+    cout << "Enum deserialization...\n";
     co_await read(&arg, sizeof(uint8_t));
     co_return;
 }
 
 template <Unsigned T, typename F>
 awaitable<void> deserialize(T &arg, F &read) {
-    if constexpr(sizeof(T) == sizeof(uint8_t)) {
+    cout << "Unsigned deserialization ";
+    if constexpr (sizeof(T) == sizeof(uint8_t)) {
+        cout << "u8...\n";
         co_await read(&arg, sizeof(uint8_t));
         co_return;
     }
-    if constexpr(sizeof(T) == sizeof(uint16_t)) {
+    if constexpr (sizeof(T) == sizeof(uint16_t)) {
+        cout << "u16...\n";
         co_await read(&arg, sizeof(uint16_t));
         arg = ntohs(arg);
         co_return;
     }
-    if constexpr(sizeof(T) == sizeof(uint32_t)) {
+    if constexpr (sizeof(T) == sizeof(uint32_t)) {
+        cout << "u32...\n";
         co_await read(&arg, sizeof(uint32_t));
         arg = ntohl(arg);
         co_return;
     }
+    cout << "ERROR\n";
     throw invalid_argument("unknown unsigned type\n");
 }
 
 template <class... Ts, typename F>
 awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
+    cout << "Variant deserialization...\n";
     uint8_t code;
     co_await deserialize(code, read);
     if (code >= variant_size_v<variant<Ts...>>) {
@@ -395,7 +403,7 @@ awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
         co_await deserialize(alt, read);
         arg = alt;
     }
-    if constexpr(is_same_v<variant<Ts...>, ClientMessageServer> ||
+    if constexpr (is_same_v<variant<Ts...>, ClientMessageServer> ||
                  is_same_v<variant<Ts...>, ServerMessageClient> ||
                  is_same_v<variant<Ts...>, GuiMessageClient> ||
                  is_same_v<variant<Ts...>, Event>
@@ -406,7 +414,7 @@ awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
             arg = alt;
         }
     }
-    if constexpr(is_same_v<variant<Ts...>, ClientMessageServer> ||
+    if constexpr (is_same_v<variant<Ts...>, ClientMessageServer> ||
                  is_same_v<variant<Ts...>, ServerMessageClient> ||
                  is_same_v<variant<Ts...>, Event>
     ) {
@@ -416,7 +424,7 @@ awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
             arg = alt;
         }
     }
-    if constexpr(is_same_v<variant<Ts...>, ServerMessageClient>) {
+    if constexpr (is_same_v<variant<Ts...>, ServerMessageClient>) {
         if (code == 4) {
             variant_alternative_t<4, variant<Ts...>> alt;
             co_await deserialize(alt, read);
@@ -428,6 +436,7 @@ awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
 
 template <class T, typename F>
 awaitable<void> deserialize(vector<T> &vec, F &read) {
+    cout << "Vector deserialization...\n";
     uint32_t size;
     co_await deserialize(size, read);
     vec.resize(size);
@@ -439,6 +448,7 @@ awaitable<void> deserialize(vector<T> &vec, F &read) {
 
 template <class T, typename F>
 awaitable<void> deserialize(set<T> &st, F &read) {
+    cout << "Set deserialization...\n";
     uint32_t size;
     co_await deserialize(size, read);
     while (size--) {
@@ -451,6 +461,7 @@ awaitable<void> deserialize(set<T> &st, F &read) {
 
 template <class K, class V, typename F>
 awaitable<void> deserialize(map<K, V> &map, F &read) {
+    cout << "Map deserialization...\n";
     uint32_t size;
     co_await deserialize(size, read);
     while (size--) {
@@ -465,9 +476,11 @@ awaitable<void> deserialize(map<K, V> &map, F &read) {
 
 template <typename F>
 awaitable<void> deserialize(string &arg, F &read) {
+    cout << "String deserialization...\n";
     uint8_t size;
     co_await deserialize(size, read);
     arg.resize(size);
+    cout << "String size is: " << size << " bytes\n";
     co_await read(arg.data(), size);
     co_return;
 }
