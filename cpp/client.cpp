@@ -119,6 +119,24 @@ void setup_client(Hello &hello) {
     lobby.explosion_radius = hello.explosion_radius;
     lobby.bomb_timer = hello.bomb_timer;
     lobby.players = { };
+
+    game.server_name = hello.server_name;
+    game.size_x = hello.size_x;
+    game.size_y = hello.size_y;
+    game.game_length = hello.game_length;
+    game.turn = 0;
+    game.players = { };
+    game.player_positions = { };
+    game.blocks = { };
+    game.bombs = { };
+    game.explosions = { };
+    game.scores = { };
+}
+
+void accept_player(AcceptedPlayer &accepted_player) {
+    lobby.players[accepted_player.id] = accepted_player.player;
+    game.players[accepted_player.id] = accepted_player.player;
+    game.scores[accepted_player.id] = (Score) 0;
 }
 
 awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {
@@ -237,23 +255,40 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
         bool empty_message = true;
         visit(overloaded {
             [&](Hello message) {
+                cout << "\n*** received Hello over TCP ***\n";
                 if (!status.in_lobby && !status.in_game) {
                     setup_client(message);
+                    client_message = lobby;
                     empty_message = false;
                     status.in_lobby = true;
                 }
             },
             [&](AcceptedPlayer message) {
-
+                cout << "\n*** received AcceptedPlayer over TCP ***\n";
+                if (status.in_lobby) {
+                    accept_player(message);
+                    client_message = lobby;
+                    empty_message = false;
+                }
             },
             [&](GameStarted message) {
-
+                cout << "\n*** received gameStarted over TCP ***\n";
+                if (!status.in_game) {
+                    for (auto &[id, player] : message.players) {
+                        AcceptedPlayer new_player = {id, player};
+                        accept_player(new_player);
+                    }
+                    client_message = game;
+                    empty_message = false;
+                    status.in_lobby = false;
+                    status.in_game = true;
+                }
             },
             [&](Turn message) {
-
+                cout << "\n*** received Turn over TCP ***\n";
             },
             [&](GameEnded message) {
-
+                cout << "\n*** received GameEnded over TCP ***\n";
             }
         }, server_message);
 
