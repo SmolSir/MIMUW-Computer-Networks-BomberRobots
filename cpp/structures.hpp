@@ -40,19 +40,17 @@ enum class Direction : uint8_t {
 struct Position {
     uint16_t x;
     uint16_t y;
-    bool operator==(const Position &other) const = default;
+    auto operator<=>(const Position &) const = default;
 };
 
 struct Bomb {
     Position position;
     uint16_t timer;
-    bool operator==(const Bomb &other) const = default;
 };
 
 struct Player {
     string name;
     string address;
-    bool operator==(const Player &other) const = default;
 };
 
 /* -------------------------------------------------------------------------
@@ -175,7 +173,6 @@ struct Game {
     vector<Bomb> bombs;
     vector<Position> explosions;
     map<PlayerId, Score> scores;
-    bool operator==(const Game &other) const = default;
 };
 
 /* -------------------------------------------------------------------------
