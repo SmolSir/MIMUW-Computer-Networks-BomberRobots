@@ -1,2 +1,2 @@
-# MIMUW-Computer-Networks-tasks
-Solutions of tasks from MIMUW Computer Networks (SK) course.
+# MIMUW-Computer-Networks-BomberRobots
+Solutions of MIMUW Computer Networks (SK) course big project task.
