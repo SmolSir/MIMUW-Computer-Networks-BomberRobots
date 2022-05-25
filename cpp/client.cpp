@@ -1,8 +1,9 @@
 #include <boost/program_options.hpp>
-#include <iostream>
 
+#include <iostream>
 #include "structures.hpp"
 
+using namespace std;
 using boost::asio::co_spawn;
 using boost::asio::detached;
 using boost::asio::ip::udp;

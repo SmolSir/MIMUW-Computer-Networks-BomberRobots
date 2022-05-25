@@ -1,11 +1,10 @@
 #include <boost/asio.hpp>
+#include "include/boost/pfr/core.hpp"
+
 #include <stdio.h>
 #include <concepts>
 #include <variant>
 
-#include "include/boost/pfr/core.hpp"
-
-using namespace std;
 using boost::asio::awaitable;
 using boost::asio::use_awaitable;
 
@@ -59,8 +58,8 @@ struct Bomb {
 };
 
 struct Player {
-    string name;
-    string address;
+    std::string name;
+    std::string address;
 };
 
 /* -------------------------------------------------------------------------
@@ -74,7 +73,7 @@ struct Move;
 
 /* Definitions */
 struct Join {
-    string name;
+    std::string name;
 };
 
 struct PlaceBomb {};
@@ -101,11 +100,11 @@ struct BombExploded;
 struct PlayerMoved;
 struct BlockPlaced;
 
-using Event = variant<BombPlaced, BombExploded, PlayerMoved, BlockPlaced>;
+using Event = std::variant<BombPlaced, BombExploded, PlayerMoved, BlockPlaced>;
 
 /* Definitions */
 struct Hello {
-    string server_name;
+    std::string server_name;
     uint8_t players_count;
     uint16_t size_x;
     uint16_t size_y;
@@ -120,16 +119,16 @@ struct AcceptedPlayer {
 };
 
 struct GameStarted {
-    map<PlayerId, Player> players;
+    std::map<PlayerId, Player> players;
 };
 
 struct Turn {
     uint16_t turn;
-    vector<Event> events;
+    std::vector<Event> events;
 };
 
 struct GameEnded {
-    map<PlayerId, Score> scores;
+    std::map<PlayerId, Score> scores;
 };
 
 /* Event subtypes definitions */
@@ -140,8 +139,8 @@ struct BombPlaced {
 
 struct BombExploded {
     BombId id;
-    vector<PlayerId> robots_destroyed;
-    vector<Position> blocks_destroyed;
+    std::vector<PlayerId> robots_destroyed;
+    std::vector<Position> blocks_destroyed;
 };
 
 struct PlayerMoved {
@@ -161,47 +160,47 @@ struct Game;
 
 /* Definitions */
 struct Lobby {
-    string server_name;
+    std::string server_name;
     uint8_t players_count;
     uint16_t size_x;
     uint16_t size_y;
     uint16_t game_length;
     uint16_t explosion_radius;
     uint16_t bomb_timer;
-    map<PlayerId, Player> players;
+    std::map<PlayerId, Player> players;
 };
 
 struct Game {
-    string server_name;
+    std::string server_name;
     uint16_t size_x;
     uint16_t size_y;
     uint16_t game_length;
     uint16_t turn;
-    map<PlayerId, Player> players;
-    map<PlayerId, Position> player_positions;
-    vector<Position> blocks;
-    vector<Bomb> bombs;
-    vector<Position> explosions;
-    map<PlayerId, Score> scores;
+    std::map<PlayerId, Player> players;
+    std::map<PlayerId, Position> player_positions;
+    std::vector<Position> blocks;
+    std::vector<Bomb> bombs;
+    std::vector<Position> explosions;
+    std::map<PlayerId, Score> scores;
 };
 
 /* -------------------------------------------------------------------------
    Aliases for communication [FROM -> TO]
    ------------------------------------------------------------------------- */
-using ClientMessageServer = variant<Join, PlaceBomb, PlaceBlock, Move>;
-using ServerMessageClient = variant<Hello, AcceptedPlayer, GameStarted, Turn, GameEnded>;
-using ClientMessageGui = variant<Lobby, Game>;
-using GuiMessageClient = variant<PlaceBomb, PlaceBlock, Move>;
+using ClientMessageServer = std::variant<Join, PlaceBomb, PlaceBlock, Move>;
+using ServerMessageClient = std::variant<Hello, AcceptedPlayer, GameStarted, Turn, GameEnded>;
+using ClientMessageGui = std::variant<Lobby, Game>;
+using GuiMessageClient = std::variant<PlaceBomb, PlaceBlock, Move>;
 
 /* -------------------------------------------------------------------------
    Concepts for template serializing and deserializing functions
    ------------------------------------------------------------------------- */
 template <class T>
-concept Aggregate = is_aggregate_v<T>;
+concept Aggregate = std::is_aggregate_v<T>;
 template <class T>
-concept Enum = is_enum_v<T>;
+concept Enum = std::is_enum_v<T>;
 template <class T>
-concept Unsigned = is_unsigned_v<T>;
+concept Unsigned = std::is_unsigned_v<T>;
 
 /* -------------------------------------------------------------------------
    Template functions for serializing all program structures
@@ -217,15 +216,15 @@ template <Unsigned T>
 void serialize(T const &arg, boost::asio::streambuf &sb);
 
 template <class... Ts>
-void serialize(variant<Ts...> const &arg, boost::asio::streambuf &sb);
+void serialize(std::variant<Ts...> const &arg, boost::asio::streambuf &sb);
 
 template <class T>
-void serialize(vector<T> const &vec, boost::asio::streambuf &sb);
+void serialize(std::vector<T> const &vec, boost::asio::streambuf &sb);
 
 template <class K, class V>
-void serialize(map<K, V> const &map, boost::asio::streambuf &sb);
+void serialize(std::map<K, V> const &map, boost::asio::streambuf &sb);
 
-void serialize(string const &arg, boost::asio::streambuf &sb);
+void serialize(std::string const &arg, boost::asio::streambuf &sb);
 
 /* Definitions */
 template <Aggregate T>
@@ -256,11 +255,11 @@ void serialize(T const &arg, boost::asio::streambuf &sb) {
         sb.sputn((const char *) &net_arg, sizeof(net_arg));
         return;
     }
-    throw invalid_argument("unknown unsigned type\n");
+    throw std::invalid_argument("unknown unsigned type\n");
 }
 
 template <class... Ts>
-void serialize(variant<Ts...> const &arg, boost::asio::streambuf &sb) {
+void serialize(std::variant<Ts...> const &arg, boost::asio::streambuf &sb) {
     uint8_t code = (uint8_t) arg.index();
     sb.sputn((const char *) &code, sizeof(code));
     visit([&sb](auto const &a) {
@@ -269,7 +268,7 @@ void serialize(variant<Ts...> const &arg, boost::asio::streambuf &sb) {
 }
 
 template <class T>
-void serialize(vector<T> const &vec, boost::asio::streambuf &sb) {
+void serialize(std::vector<T> const &vec, boost::asio::streambuf &sb) {
     uint32_t vec_size = (uint32_t) vec.size();
     uint32_t net_vec_size = htonl(vec_size);
     sb.sputn((const char *) &net_vec_size, sizeof(net_vec_size));
@@ -279,7 +278,7 @@ void serialize(vector<T> const &vec, boost::asio::streambuf &sb) {
 }
 
 template <class K, class V>
-void serialize(map<K, V> const &map, boost::asio::streambuf &sb) {
+void serialize(std::map<K, V> const &map, boost::asio::streambuf &sb) {
     uint32_t map_size = (uint32_t) map.size();
     uint32_t net_map_size = htonl(map_size);
     sb.sputn((const char *) &net_map_size, sizeof(net_map_size));
@@ -290,9 +289,9 @@ void serialize(map<K, V> const &map, boost::asio::streambuf &sb) {
     }
 }
 
-void serialize(string const &arg, boost::asio::streambuf &sb) {
+void serialize(std::string const &arg, boost::asio::streambuf &sb) {
     if (arg.size() > UINT8_MAX) {
-        throw length_error("string length above 255");
+        throw std::length_error("std::string length above 255");
     }
     uint8_t arg_size = (uint8_t) arg.size();
     sb.sputn((const char *) &arg_size, sizeof(arg_size));
@@ -313,16 +312,16 @@ template <Unsigned T, typename F>
 awaitable<void> deserialize(T &arg, F &read);
 
 template <class... Ts, typename F>
-awaitable<void> deserialize(variant<Ts...> &arg, F &read);
+awaitable<void> deserialize(std::variant<Ts...> &arg, F &read);
 
 template <class T, typename F>
-awaitable<void> deserialize(vector<T> &vec, F &read);
+awaitable<void> deserialize(std::vector<T> &vec, F &read);
 
 template <class K, class V, typename F>
-awaitable<void> deserialize(map<K, V> &map, F &read);
+awaitable<void> deserialize(std::map<K, V> &map, F &read);
 
 template <typename F>
-awaitable<void> deserialize(string &arg, F &read);
+awaitable<void> deserialize(std::string &arg, F &read);
 
 /* Definitions */
 template <Aggregate T, typename F>
@@ -355,51 +354,51 @@ awaitable<void> deserialize(T &arg, F &read) {
         arg = ntohl(arg);
         co_return;
     }
-    throw invalid_argument("unknown unsigned type\n");
+    throw std::invalid_argument("unknown unsigned type\n");
 }
 
 template <class... Ts, typename F>
-awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
+awaitable<void> deserialize(std::variant<Ts...> &arg, F &read) {
     uint8_t code;
     co_await deserialize(code, read);
-    if (code >= variant_size_v<variant<Ts...>>) {
-        throw invalid_argument("unknown variant type ID\n");
+    if (code >= std::variant_size_v<std::variant<Ts...>>) {
+        throw std::invalid_argument("unknown variant type ID\n");
     }
     /* we need as many ifs as there are codes possible, here from 0 to 4 */
     if (code == 0) { // All variants have defined code 0
-        variant_alternative_t<0, variant<Ts...>> alt;
+        std::variant_alternative_t<0, std::variant<Ts...>> alt;
         co_await deserialize(alt, read);
         arg = alt;
     }
     if (code == 1) { // All variants have defined code 1
-        variant_alternative_t<1, variant<Ts...>> alt;
+        std::variant_alternative_t<1, std::variant<Ts...>> alt;
         co_await deserialize(alt, read);
         arg = alt;
     }
-    if constexpr (is_same_v<variant<Ts...>, ClientMessageServer> ||
-                 is_same_v<variant<Ts...>, ServerMessageClient> ||
-                 is_same_v<variant<Ts...>, GuiMessageClient> ||
-                 is_same_v<variant<Ts...>, Event>
+    if constexpr (std::is_same_v<std::variant<Ts...>, ClientMessageServer> ||
+                 std::is_same_v<std::variant<Ts...>, ServerMessageClient> ||
+                 std::is_same_v<std::variant<Ts...>, GuiMessageClient> ||
+                 std::is_same_v<std::variant<Ts...>, Event>
     ) {
         if (code == 2) {
-            variant_alternative_t<2, variant<Ts...>> alt;
+            std::variant_alternative_t<2, std::variant<Ts...>> alt;
             co_await deserialize(alt, read);
             arg = alt;
         }
     }
-    if constexpr (is_same_v<variant<Ts...>, ClientMessageServer> ||
-                 is_same_v<variant<Ts...>, ServerMessageClient> ||
-                 is_same_v<variant<Ts...>, Event>
+    if constexpr (std::is_same_v<std::variant<Ts...>, ClientMessageServer> ||
+                 std::is_same_v<std::variant<Ts...>, ServerMessageClient> ||
+                 std::is_same_v<std::variant<Ts...>, Event>
     ) {
         if (code == 3) {
-            variant_alternative_t<3, variant<Ts...>> alt;
+            std::variant_alternative_t<3, std::variant<Ts...>> alt;
             co_await deserialize(alt, read);
             arg = alt;
         }
     }
-    if constexpr (is_same_v<variant<Ts...>, ServerMessageClient>) {
+    if constexpr (std::is_same_v<std::variant<Ts...>, ServerMessageClient>) {
         if (code == 4) {
-            variant_alternative_t<4, variant<Ts...>> alt;
+            std::variant_alternative_t<4, std::variant<Ts...>> alt;
             co_await deserialize(alt, read);
             arg = alt;
         }
@@ -408,7 +407,7 @@ awaitable<void> deserialize(variant<Ts...> &arg, F &read) {
 }
 
 template <class T, typename F>
-awaitable<void> deserialize(vector<T> &vec, F &read) {
+awaitable<void> deserialize(std::vector<T> &vec, F &read) {
     uint32_t size;
     co_await deserialize(size, read);
     vec.resize(size);
@@ -419,7 +418,7 @@ awaitable<void> deserialize(vector<T> &vec, F &read) {
 }
 
 template <class K, class V, typename F>
-awaitable<void> deserialize(map<K, V> &map, F &read) {
+awaitable<void> deserialize(std::map<K, V> &map, F &read) {
     uint32_t size;
     co_await deserialize(size, read);
     while (size--) {
@@ -433,7 +432,7 @@ awaitable<void> deserialize(map<K, V> &map, F &read) {
 }
 
 template <typename F>
-awaitable<void> deserialize(string &arg, F &read) {
+awaitable<void> deserialize(std::string &arg, F &read) {
     uint8_t size;
     co_await deserialize(size, read);
     arg.resize(size);
