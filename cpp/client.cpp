@@ -8,7 +8,6 @@ using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
 
 namespace po = boost::program_options;
-namespace this_coro = boost::asio::this_coro;
 
 #define MAX_UDP_DATA_SIZE 65527 // because of IPv6
 
@@ -50,21 +49,9 @@ sockaddrStr server;
 string player_name;
 string port;
 
-string make_string(boost::asio::streambuf &streambuf) {
-    return {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
-}
-
-void print_streambuf(boost::asio::streambuf &streambuf) {
-    string content = {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
-    cout << "buffer has " << content.size() << " byte(s)\n";
-    cout << "ASCII:\n";
-    for (auto c : content) cout << (int) c << "\t";
-    cout << "\n";
-    cout << "CHARS:\n";
-    for (auto c : content) cout << (char) c << "\t";
-    cout << "\n";
-}
-
+/* -------------------------------------------------------------------------
+   Parsing & helper functions
+   ------------------------------------------------------------------------- */
 sockaddrStr get_sockaddr_str(string &str) {
     auto delimiter = str.find_last_of(':');
     sockaddrStr addr_str = {
@@ -224,18 +211,15 @@ void update_bombs_explosions_blocks(
     game.turn = current_turn;
 }
 
+/* -------------------------------------------------------------------------
+   Coroutine function for communication from gui to server
+   ------------------------------------------------------------------------- */
 awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_socket) {
     boost::asio::streambuf read_streambuf;
     boost::asio::streambuf send_streambuf;
 
     auto read_UDP = [&](void* arg, size_t size) -> awaitable<void> {
-        try {
-            read_streambuf.commit(size);
-            read_streambuf.sgetn((char *) arg, size);
-        }
-        catch(exception &e) {
-            throw e;
-        }
+        read_streambuf.sgetn((char *) arg, size);
         co_return;
     };
 
@@ -246,95 +230,83 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
         GuiMessageClient gui_message;
         try {
             boost::asio::streambuf::mutable_buffers_type mut_read_streambuf = read_streambuf.prepare(MAX_UDP_DATA_SIZE);
-            co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
+            size_t receive_size = co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
+            read_streambuf.commit(receive_size);
             co_await deserialize(gui_message, read_UDP);
+            if (read_streambuf.in_avail()) {
+                throw length_error("leftover message bytes from gui, IGNORED\n");
+            }
         }
         catch(exception &e) {
-            cerr << "error: " << e.what() << "\n";
+            cerr << "error: " << e.what() << " from gui, IGNORED\n";
             continue;
         }
-        
+        catch(...) {
+            cerr << "Exception of unknown type!\n";
+            continue;
+        }
+
         if (client.in_lobby && !client.join_request_sent) {
             ClientMessageServer join = Join { .name = player_name };
-            try {
-                serialize(join, send_streambuf);
-                co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
-                client.join_request_sent = true;
-            }
-            catch(exception &e) {
-                cerr << "error: " << e.what() << "\n";
-                client.connected_to_server = false;
-            }
+            serialize(join, send_streambuf);
+            co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
+            client.join_request_sent = true;
         }
         
         ClientMessageServer client_message;
         if (client.in_game) {
             visit(overloaded {
                 [&](PlaceBomb) {
-                    cout << "\n*** received PlaceBomb over UDP ***\n";
+                    cerr << "\n*** received PlaceBomb over UDP ***\n";
                     client_message = PlaceBomb { };
                 },
                 [&](PlaceBlock) {
-                    cout << "\n*** received PlaceBlock over UDP ***\n";
+                    cerr << "\n*** received PlaceBlock over UDP ***\n";
                     client_message = PlaceBlock { };
                 },
                 [&](Move message) {
-                    cout << "\n*** received Move over UDP ***\n";
+                    cerr << "\n*** received Move over UDP ***\n";
                     client_message = Move { .direction = message.direction };
                 }
             }, gui_message);
-            try {
-                serialize(client_message, send_streambuf);
-                co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
-            }
-            catch(exception &e) {
-                cerr << "error: " << e.what() << "\n";
-                client.connected_to_server = false;
-            }
+
+            serialize(client_message, send_streambuf);
+            co_await server_socket.async_send(send_streambuf.data(), use_awaitable);
         }
     }
 
     co_return;
 }
 
+/* -------------------------------------------------------------------------
+   Coroutine function for communication from server to gui
+   ------------------------------------------------------------------------- */
 awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_socket, udp::endpoint &gui_endpoint) {
     boost::asio::streambuf read_streambuf;
     boost::asio::streambuf send_streambuf;
 
     auto read_TCP = [&](void* arg, size_t size) -> awaitable<void> {
-        try {
-            co_await boost::asio::async_read(
-                server_socket, 
-                read_streambuf, 
-                boost::asio::transfer_exactly(size), 
-                use_awaitable
-            );
-            read_streambuf.sgetn((char *) arg, size);
-        }
-        catch(exception &e) {
-            client.connected_to_server = false;
-            throw e;
-        }
+        co_await boost::asio::async_read(
+            server_socket, 
+            read_streambuf, 
+            boost::asio::transfer_exactly(size), 
+            use_awaitable
+        );
+        read_streambuf.sgetn((char *) arg, size);
     };
 
     for (;;) {
         read_streambuf.consume(read_streambuf.size());
         send_streambuf.consume(send_streambuf.size());
+        
         ServerMessageClient server_message;
-
-        try {
-            co_await deserialize(server_message, read_TCP);
-        }
-        catch(exception &e) {
-            client.connected_to_server = false;
-            break;
-        }
+        co_await deserialize(server_message, read_TCP);
 
         ClientMessageGui client_message;
         bool send_message = false;
         visit(overloaded {
             [&](Hello message) {
-                cout << "\n*** received Hello over TCP ***\n";
+                cerr << "\n*** received Hello over TCP ***\n";
                 if (!client.in_lobby && !client.in_game) {
                     settings = message;
                     setup();
@@ -344,7 +316,7 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](AcceptedPlayer message) {
-                cout << "\n*** received AcceptedPlayer over TCP ***\n";
+                cerr << "\n*** received AcceptedPlayer over TCP ***\n";
                 if (client.in_lobby) {
                     accept_player(message);
                     client_message = lobby;
@@ -352,7 +324,7 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](GameStarted message) {
-                cout << "\n*** received gameStarted over TCP ***\n";
+                cerr << "\n*** received gameStarted over TCP ***\n";
                 if (!client.in_game) {
                     for (auto &[id, player] : message.players) {
                         AcceptedPlayer new_player = {id, player};
@@ -363,7 +335,7 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](Turn message) {
-                cout << "\n*** received Turn over TCP ***\n";
+                cerr << "\n*** received Turn over TCP ***\n";
                 if (client.in_game) {
                     vector<BombExploded> turn_bombs_exploded = { };
                     vector<BlockPlaced> turn_blocks_placed = { };
@@ -394,7 +366,7 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](GameEnded) {
-                cout << "\n*** received GameEnded over TCP ***\n";
+                cerr << "\n*** received GameEnded over TCP ***\n";
                 if (client.in_game) {
                     setup();
                     client_message = lobby;
@@ -406,35 +378,27 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
             }
         }, server_message);
 
-        try {
-            if (send_message) {
-                serialize(client_message, send_streambuf);
-                co_await gui_socket.async_send_to(send_streambuf.data(), gui_endpoint, use_awaitable);
-            }
-        }
-        catch(exception &e) {
-            cerr << "error: " << e.what() << "\n";
-            continue;
+        if (send_message) {
+            serialize(client_message, send_streambuf);
+            co_await gui_socket.async_send_to(send_streambuf.data(), gui_endpoint, use_awaitable);
         }
     }
 
     co_return;
 }
 
+/* -------------------------------------------------------------------------
+   Main function for parsing, opening connections and starting coroutines
+   ------------------------------------------------------------------------- */
 int main(int argc, char *argv[]) {
 
-    /* parsing command line parameters */
+    /* Parse command line parameters */
     bool parsing_result = process_command_line(argc, argv);
 
     if (!parsing_result) {
-        cerr << "Failed to parse parameters.\n";
+        cerr << "Failed to parse parameters\n";
         return 1;
     }
-
-    cout << gui.addr << " : " << gui.port << "\t"
-         << server.addr << " : " << server.port << "\t"
-         << player_name << "\t"
-         << port << "\n";
 
     try {
         boost::asio::io_context io_context;
