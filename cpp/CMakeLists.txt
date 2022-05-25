@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # -Werror
-set(CMAKE_CXX_FLAGS "-std=gnu++20 -Wall -Wextra -Wconversion -O2")
+set(CMAKE_CXX_FLAGS "-std=gnu++20 -Wall -Wextra -Wconversion -Werror -O2")
 
 find_package(Boost 1.74.0 COMPONENTS program_options REQUIRED)
 include_directories(${Boost_INCLUDE_DIR} include)

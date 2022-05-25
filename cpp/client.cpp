@@ -1,4 +1,5 @@
 #include <boost/program_options.hpp>
+#include <iostream>
 
 #include "structures.hpp"
 
@@ -19,7 +20,6 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 
 /* structure storing data about client */
 struct Client {
-    bool connected_to_server = false;
     bool in_lobby = false;
     bool in_game = false;
     bool join_request_sent = false;
@@ -73,8 +73,8 @@ bool process_command_line(int argc, char** argv) {
             ("help,h", "help message")
             ("player-name,n", po::value<string>(&player_name)->required(), "player name")
             ("port,p", po::value<uint16_t>(&port_u16)->required(), "port for comms from gui")
-            ("server-address,s", po::value<string>(&server_sockaddr_str)->required(), "server address:port")
-        ;
+            ("server-address,s", po::value<string>(&server_sockaddr_str)->required(), 
+                "server address:port");
 
         po::store(po::parse_command_line(argc, argv, desc), program_params);
 
@@ -123,7 +123,6 @@ void setup() {
     game.explosions.clear();
     game.scores.clear();
 
-//  client.connected_to_server should NOT be changed here
     client.in_lobby = false;
     client.in_game = false;
     client.join_request_sent = false;
@@ -148,8 +147,7 @@ return (position.x >= 0 && position.x < settings.size_x &&
         position.y >= 0 && position.y < settings.size_y);
 }
 
-void update_bombs_explosions_blocks(
-    vector<BombExploded> &bombs_exploded, 
+void update_bombs_explosions_blocks(vector<BombExploded> &bombs_exploded, 
     vector<BlockPlaced> &blocks_placed, 
     uint16_t &current_turn) 
 {
@@ -163,7 +161,11 @@ void update_bombs_explosions_blocks(
 
         for (SignedPosition direction : explosion_direction) {
             SignedPosition check = {bomb.position.x, bomb.position.y};
-            for (uint16_t radius = 0; radius <= settings.explosion_radius && validate_position(check); radius++) {
+            for (
+                uint16_t radius = 0; 
+                radius <= settings.explosion_radius && validate_position(check);
+                radius++)
+            {
                 Position checked = {(uint16_t) check.x, (uint16_t) check.y};
                 explosions.insert(checked);
                 if (client.blocks.contains(checked)) {
@@ -229,8 +231,10 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
         send_streambuf.consume(send_streambuf.size());
         GuiMessageClient gui_message;
         try {
-            boost::asio::streambuf::mutable_buffers_type mut_read_streambuf = read_streambuf.prepare(MAX_UDP_DATA_SIZE);
-            size_t receive_size = co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
+            boost::asio::streambuf::mutable_buffers_type mut_read_streambuf = 
+                read_streambuf.prepare(MAX_UDP_DATA_SIZE);
+            size_t receive_size = 
+                co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
             read_streambuf.commit(receive_size);
             co_await deserialize(gui_message, read_UDP);
             if (read_streambuf.in_avail()) {
@@ -257,15 +261,12 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
         if (client.in_game) {
             visit(overloaded {
                 [&](PlaceBomb) {
-                    cerr << "\n*** received PlaceBomb over UDP ***\n";
                     client_message = PlaceBomb { };
                 },
                 [&](PlaceBlock) {
-                    cerr << "\n*** received PlaceBlock over UDP ***\n";
                     client_message = PlaceBlock { };
                 },
                 [&](Move message) {
-                    cerr << "\n*** received Move over UDP ***\n";
                     client_message = Move { .direction = message.direction };
                 }
             }, gui_message);
@@ -281,7 +282,11 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
 /* -------------------------------------------------------------------------
    Coroutine function for communication from server to gui
    ------------------------------------------------------------------------- */
-awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_socket, udp::endpoint &gui_endpoint) {
+awaitable<void> server_listener(
+    tcp::socket &server_socket,
+    udp::socket &gui_socket,
+    udp::endpoint &gui_endpoint) 
+{
     boost::asio::streambuf read_streambuf;
     boost::asio::streambuf send_streambuf;
 
@@ -306,7 +311,6 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
         bool send_message = false;
         visit(overloaded {
             [&](Hello message) {
-                cerr << "\n*** received Hello over TCP ***\n";
                 if (!client.in_lobby && !client.in_game) {
                     settings = message;
                     setup();
@@ -316,7 +320,6 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](AcceptedPlayer message) {
-                cerr << "\n*** received AcceptedPlayer over TCP ***\n";
                 if (client.in_lobby) {
                     accept_player(message);
                     client_message = lobby;
@@ -324,7 +327,6 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](GameStarted message) {
-                cerr << "\n*** received gameStarted over TCP ***\n";
                 if (!client.in_game) {
                     for (auto &[id, player] : message.players) {
                         AcceptedPlayer new_player = {id, player};
@@ -335,7 +337,6 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                 }
             },
             [&](Turn message) {
-                cerr << "\n*** received Turn over TCP ***\n";
                 if (client.in_game) {
                     vector<BombExploded> turn_bombs_exploded = { };
                     vector<BlockPlaced> turn_blocks_placed = { };
@@ -345,7 +346,8 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                     for (Event const &event : message.events) {
                         visit(overloaded {
                             [&](BombPlaced placed) {
-                                client.bombs[placed.id] = (Bomb) { placed.position, settings.bomb_timer };
+                                client.bombs[placed.id] = 
+                                    (Bomb) { placed.position, settings.bomb_timer };
                             },
                             [&](BombExploded exploded) {
                                 turn_bombs_exploded.push_back(exploded);
@@ -359,14 +361,14 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
                         }, event);
                     }
 
-                    update_bombs_explosions_blocks(turn_bombs_exploded, turn_blocks_placed, message.turn);
+                    update_bombs_explosions_blocks(turn_bombs_exploded, turn_blocks_placed,
+                        message.turn);
    
                     client_message = game;
                     send_message = true;
                 }
             },
             [&](GameEnded) {
-                cerr << "\n*** received GameEnded over TCP ***\n";
                 if (client.in_game) {
                     setup();
                     client_message = lobby;
@@ -416,17 +418,21 @@ int main(int argc, char *argv[]) {
 
         /* Prepare socket for exchanging data with server */
         tcp::resolver server_resolver(io_context);
-        tcp::resolver::results_type server_endpoints = server_resolver.resolve(server.addr, server.port);
+        tcp::resolver::results_type server_endpoints =
+            server_resolver.resolve(server.addr, server.port);
         tcp::socket server_socket(io_context);
         boost::asio::connect(server_socket, server_endpoints);
         server_socket.set_option(tcp::no_delay(true)); // set the TCP_NODELAY flag
-        client.connected_to_server = true;
 
         boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ io_context.stop(); });
 
         co_spawn(io_context, gui_listener(server_socket, client_socket), rethrow_exception);
-        co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), rethrow_exception);
+        co_spawn(
+            io_context, 
+            server_listener(server_socket, gui_socket, gui_endpoint), 
+            rethrow_exception
+        );
 
         io_context.run();
     }
