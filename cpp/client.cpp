@@ -156,6 +156,11 @@ void update_client_bomb_timers() {
     }
 }
 
+bool validate_position(SignedPosition &position) {
+return (position.x >= 0 && position.x < settings.size_x &&
+        position.y >= 0 && position.y < settings.size_y);
+}
+
 void update_bombs_explosions_blocks(
     vector<BombExploded> &bombs_exploded, 
     vector<BlockPlaced> &blocks_placed, 
@@ -165,17 +170,30 @@ void update_bombs_explosions_blocks(
     set<Position> all_blocks_destroyed = { };
     set<PlayerId> all_robots_destroyed = { };
 
-    for (BombExploded const &bomb : bombs_exploded) {
-        client.bombs.erase(bomb.id);
-        
-        /* cross computation goes here */
+    for (BombExploded const &exploded : bombs_exploded) {
+        Bomb bomb = client.bombs[exploded.id];
+        vector<SignedPosition> explosion_direction = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
-        for (PlayerId const &id : bomb.robots_destroyed) {
+        for (SignedPosition direction : explosion_direction) {
+            SignedPosition check = {bomb.position.x, bomb.position.y};
+            for (uint16_t radius = 0; radius <= settings.explosion_radius && validate_position(check); radius++) {
+                Position checked = {(uint16_t) check.x, (uint16_t) check.y};
+                explosions.insert(checked);
+                if (client.blocks.contains(checked)) {
+                    break;
+                }
+                check += direction;
+            }
+        }
+
+        for (PlayerId const &id : exploded.robots_destroyed) {
             all_robots_destroyed.insert(id);
         }
-        for (Position const &position : bomb.blocks_destroyed) {
+        for (Position const &position : exploded.blocks_destroyed) {
             all_blocks_destroyed.insert(position);
         }
+        client.bombs.erase(exploded.id);
+        
     }
 
     /* update blocks and copy the blocks from client to game */
@@ -228,16 +246,13 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
         GuiMessageClient gui_message;
         try {
             boost::asio::streambuf::mutable_buffers_type mut_read_streambuf = read_streambuf.prepare(MAX_UDP_DATA_SIZE);
-            size_t read_size = co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
-            cout << "read " << read_size << " bytes from UDP\n";
+            co_await client_socket.async_receive(mut_read_streambuf, use_awaitable);
             co_await deserialize(gui_message, read_UDP);
         }
         catch(exception &e) {
             cerr << "error: " << e.what() << "\n";
             continue;
         }
-        cout << "No exceptions!\n";
-
         
         if (client.in_lobby && !client.join_request_sent) {
             ClientMessageServer join = Join { .name = player_name };
@@ -256,15 +271,15 @@ awaitable<void> gui_listener(tcp::socket &server_socket, udp::socket &client_soc
         if (client.in_game) {
             visit(overloaded {
                 [&](PlaceBomb) {
-                    cout << "received PlaceBomb\n";
+                    cout << "\n*** received PlaceBomb over UDP ***\n";
                     client_message = PlaceBomb { };
                 },
                 [&](PlaceBlock) {
-                    cout << "received PlaceBlock\n";
+                    cout << "\n*** received PlaceBlock over UDP ***\n";
                     client_message = PlaceBlock { };
                 },
                 [&](Move message) {
-                    cout << "received Move: " << (int) message.direction << "\n";
+                    cout << "\n*** received Move over UDP ***\n";
                     client_message = Move { .direction = message.direction };
                 }
             }, gui_message);
@@ -288,15 +303,12 @@ awaitable<void> server_listener(tcp::socket &server_socket, udp::socket &gui_soc
 
     auto read_TCP = [&](void* arg, size_t size) -> awaitable<void> {
         try {
-            cout << "reading " << size << " bytes from TCP\n";
-            size_t read_size = co_await boost::asio::async_read(
-                    server_socket, 
-                    read_streambuf, 
-                    boost::asio::transfer_exactly(size), 
-                    use_awaitable
-                );
-            cout << "received " << read_size << " bytes from TCP:\n";
-            print_streambuf(read_streambuf);
+            co_await boost::asio::async_read(
+                server_socket, 
+                read_streambuf, 
+                boost::asio::transfer_exactly(size), 
+                use_awaitable
+            );
             read_streambuf.sgetn((char *) arg, size);
         }
         catch(exception &e) {
@@ -449,8 +461,8 @@ int main(int argc, char *argv[]) {
         boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ io_context.stop(); });
 
-        co_spawn(io_context, gui_listener(server_socket, client_socket), detached);
-        co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), detached);
+        co_spawn(io_context, gui_listener(server_socket, client_socket), rethrow_exception);
+        co_spawn(io_context, server_listener(server_socket, gui_socket, gui_endpoint), rethrow_exception);
 
         io_context.run();
     }

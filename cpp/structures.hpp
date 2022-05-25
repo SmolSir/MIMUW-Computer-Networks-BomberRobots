@@ -22,6 +22,7 @@ using boost::asio::use_awaitable;
 enum class Direction : uint8_t;
 
 struct Position;
+struct SignedPosition;
 struct Bomb;
 struct Player;
 
@@ -41,6 +42,16 @@ struct Position {
     uint16_t x;
     uint16_t y;
     auto operator<=>(const Position &) const = default;
+};
+
+struct SignedPosition {
+    int32_t x;
+    int32_t y;
+    SignedPosition& operator+=(const SignedPosition &other) {
+        this->x += other.x;
+        this->y += other.y;
+        return *this;
+    };
 };
 
 struct Bomb {
