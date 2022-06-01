@@ -21,7 +21,7 @@ struct Settings {
     uint16_t game_length;
     string server_name;
     uint16_t port;
-    uint32_t seed = std::chrono::system_clock::now().time_since_epoch().count();
+    uint32_t seed = (uint32_t) chrono::system_clock::now().time_since_epoch().count();
     uint16_t size_x;
     uint16_t size_y;
 };
