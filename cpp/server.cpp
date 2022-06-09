@@ -48,12 +48,12 @@ struct Server {
     T random(T mod);
     Position random_position();
 
-    awaitable<Hello> hello();
-    awaitable<AcceptedPlayer> accepted_player(PlayerId &id, Player &player);
-    awaitable<GameStarted> game_started();
-    awaitable<Turn> initiate();
-    awaitable<Turn> turn();
-    awaitable<GameEnded> game_ended();
+    Hello hello();
+    AcceptedPlayer accepted_player(PlayerId &id, Player &player);
+    GameStarted game_started();
+    Turn initiate();
+    Turn turn();
+    GameEnded game_ended();
 };
 
 /* -------------------------------------------------------------------------
@@ -126,8 +126,8 @@ Position Server::random_position() {
     };
 }
 
-awaitable<Hello> Server::hello() {
-    co_return Hello {
+Hello Server::hello() {
+    return Hello {
         .server_name = settings.server_name,
         .players_count = settings.players_count,
         .size_x = settings.size_x,
@@ -138,20 +138,20 @@ awaitable<Hello> Server::hello() {
     };
 }
 
-awaitable<AcceptedPlayer> Server::accepted_player(PlayerId &id, Player &player) {
-    co_return AcceptedPlayer {
+AcceptedPlayer Server::accepted_player(PlayerId &id, Player &player) {
+    return AcceptedPlayer {
         .id = id,
         .player = player,
     };
 }
 
-awaitable<GameStarted> Server::game_started() {
-    co_return GameStarted {
+GameStarted Server::game_started() {
+    return GameStarted {
         .players = game_state.players,
     };
 }
 
-awaitable<Turn> Server::initiate() {
+Turn Server::initiate() {
     game_state.turn_number = 0;
     vector<Event> events = { };
 
@@ -167,23 +167,20 @@ awaitable<Turn> Server::initiate() {
         events.push_back(BlockPlaced {position});
     }
 
-    Turn turn = {
+    return Turn {
         .turn = game_state.turn_number,
         .events = events,
     };
-
-    game_state.turn_number++;
-    co_return turn;
 }
 
-awaitable<Turn> Server::turn() {
+Turn Server::turn() {
     vector<Event> events = { };
     set<Position> blocks_destroyed = { };
     set<PlayerId> robots_destroyed = { };
 }
 
-awaitable<GameEnded> Server::game_ended() {
-    co_return GameEnded {
+GameEnded Server::game_ended() {
+    return GameEnded {
         .scores = game_state.scores,
     };
 }
