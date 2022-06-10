@@ -58,7 +58,7 @@ struct Server {
     Position random_position();
     
     void reset_game_state();
-    bool validate_position(SignedPosition &signed_position);
+    bool validate_signed_position(SignedPosition &signed_position);
     BombExploded explosion(BombId bomb_id);
 
     Hello hello_message();
@@ -179,14 +179,51 @@ void Server::reset_game_state() {
     return;
 }
 
-bool Server::validate_position(SignedPosition &signed_position) {
+bool Server::validate_signed_position(SignedPosition &signed_position) {
     return (signed_position.x >= 0 && signed_position.x < settings.size_x &&
             signed_position.y >= 0 && signed_position.y < settings.size_y);
 }
 
 BombExploded Server::explosion(BombId bomb_id) {
-    vector<PlayerId> robots_destroyed = { };
-    vector<Position> blocks_destroyed = { };
+    set<PlayerId> robots_destroyed = { };
+    set<Position> blocks_destroyed = { };
+
+    Bomb bomb = game_state.bombs[bomb_id];
+
+    for (auto const &[direction, move] : move_map) {
+        SignedPosition signed_position = to_signed_position(bomb.position);
+
+        for (
+            uint16_t radius = 0; 
+            radius <= settings.explosion_radius && validate_signed_position(signed_position);
+            radius++)
+        {
+            Position position = from_signed_position(signed_position);
+            for (const auto &[player_id, player_position] : game_state.robot_positions) {
+                if (position == player_position) {
+                    robots_destroyed.insert(player_id);
+                }
+            }
+
+            if (game_state.blocks.contains(position)) {
+                blocks_destroyed.insert(position);
+                break;
+            }
+
+            signed_position += move;
+        }
+    }
+
+    BombExploded bomb_exploded {
+        .id = bomb_id,
+        .robots_destroyed = { },
+        .blocks_destroyed = { },
+    };
+
+    bomb_exploded.robots_destroyed.assign(robots_destroyed.begin(), robots_destroyed.end());
+    bomb_exploded.blocks_destroyed.assign(blocks_destroyed.begin(), blocks_destroyed.end());
+
+    return bomb_exploded;
 }
 
 Hello Server::hello_message() {
@@ -302,7 +339,7 @@ Turn Server::simulate_turn() {
                         SignedPosition new_signed_position = to_signed_position(position);
                         new_signed_position += move_map[new_move.direction];
 
-                        if (validate_position(new_signed_position)) {
+                        if (validate_signed_position(new_signed_position)) {
                             Position new_position = from_signed_position(new_signed_position);
 
                             if (!game_state.blocks.contains(new_position)) {
