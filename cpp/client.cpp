@@ -81,7 +81,7 @@ bool process_command_line(int argc, char** argv) {
 
         if (program_params.count("help")) {
             cout << desc << "\n";
-            return false;
+            exit(0);
         }
 
         po::notify(program_params);

@@ -4,7 +4,7 @@ cmake ..
 make
 ./robots-server         \
     -b 5                \
-    -c 2                \
+    -c 1                \
     -d 1000             \
     -e 2                \
     -k 10               \
