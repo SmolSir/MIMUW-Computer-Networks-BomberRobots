@@ -2,9 +2,18 @@
 
 #include <iostream>
 #include <random>
+#include <queue>
 #include "structures.hpp"
 
+#define MAX_CLIENTS 25
+#define PRINT true
+
 using namespace std;
+using boost::asio::co_spawn;
+using boost::asio::detached;
+using boost::asio::ip::tcp;
+
+using ClientId = uint32_t;
 
 namespace po = boost::program_options;
 
@@ -46,10 +55,13 @@ struct GameState {
 struct Server {
     Settings settings;
     GameState game_state;
+    ClientId next_client_id;
     PlayerId next_player_id;
     BombId next_bomb_id;
-    
-    map<PlayerId, ClientMessageServer> player_messages;
+    uint8_t connected_clients;
+
+    map<ClientId, queue<ServerMessageClient>> queued_messages = { };
+    map<PlayerId, ClientMessageServer> read_messages;
     vector<AcceptedPlayer> accepted_players;
     vector<Turn> completed_turns;
 
@@ -92,9 +104,10 @@ bool process_command_line(int argc, char **argv) {
         desc.add_options()
             ("bomb-timer,b", po::value<uint16_t>(&server.settings.bomb_timer)->required())
             ("players-count,c", po::value<uint16_t>(&players_count)->required())
-            ("turn-duration,d", po::value<uint64_t>(&server.settings.turn_duration)->required(),
-                "milliseconds")
-            ("explosion-radius,e", po::value<uint16_t>(&server.settings.explosion_radius)->required())
+            ("turn-duration,d", 
+                po::value<uint64_t>(&server.settings.turn_duration)->required(), "milliseconds")
+            ("explosion-radius,e",
+                po::value<uint16_t>(&server.settings.explosion_radius)->required())
             ("help,h", "help message")
             ("initial-blocks,k", po::value<uint16_t>(&server.settings.initial_blocks)->required())
             ("game-length,l", po::value<uint16_t>(&server.settings.game_length)->required())
@@ -169,10 +182,10 @@ Position Server::random_position() {
 
 void Server::reset_game_state() {
     game_state.reset();
-    next_bomb_id = 0;
     next_player_id = 0;
+    next_bomb_id = 0;
 
-    player_messages = { };
+    read_messages = { };
     accepted_players = { };
     completed_turns = { };
 
@@ -252,7 +265,6 @@ AcceptedPlayer Server::add_accepted_player(Player &player) {
 }
 
 GameStarted Server::start_game() {
-    game_state.is_active = true;
     return GameStarted {
         .players = game_state.players,
     };
@@ -310,7 +322,7 @@ Turn Server::simulate_turn() {
                 game_state.robot_positions[player_id] = respawn_position;
                 game_state.scores[player_id]++;
             }
-            else if (player_messages.contains(player_id)) { // player did something
+            else if (read_messages.contains(player_id)) { // player did something
                 Position position = game_state.robot_positions[player_id];
                         
                 visit(overloaded {
@@ -352,7 +364,7 @@ Turn Server::simulate_turn() {
                             }
                         }
                     },
-                }, player_messages[player_id]);
+                }, read_messages[player_id]);
             }
         }
     }
@@ -363,16 +375,126 @@ Turn Server::simulate_turn() {
     };
     completed_turns.push_back(turn);
 
-    player_messages = { };
+    read_messages = { };
     game_state.turn_number++;
     return turn;
 }
 
 GameEnded Server::end_game() {
-    game_state.is_active = false;
     return GameEnded {
         .scores = game_state.scores,
     };
+}
+
+/* -------------------------------------------------------------------------
+   Coroutine functions for running the server
+   ------------------------------------------------------------------------- */
+string make_string(boost::asio::streambuf &streambuf) {
+    return {buffers_begin(streambuf.data()), buffers_end(streambuf.data())};
+}
+
+void print_streambuf(boost::asio::streambuf &streambuf) {
+    string content = make_string(streambuf);
+    cout << "buffer has " << content.size() << " byte(s)\n";
+    cout << "ASCII:\n";
+    for (auto c : content) cout << (int) c << "\t";
+    cout << "\n";
+    cout << "CHARS:\n";
+    for (auto c : content) cout << (char) c << "\t";
+    cout << "\n";
+}
+
+template <Unsigned T>
+awaitable<void> wait_for(T milliseconds) {
+    boost::asio::deadline_timer timer(
+        co_await boost::asio::this_coro::executor,
+        boost::posix_time::milliseconds(milliseconds)
+    );
+    co_await timer.async_wait(use_awaitable);
+
+    co_return;
+}
+
+awaitable<void> client_attendant(boost::asio::ip::tcp::socket socket) {
+    boost::asio::streambuf read_streambuf;
+    boost::asio::streambuf send_streambuf; 
+
+    ClientId client_id = server.next_client_id;
+    server.queued_messages.insert({client_id, { }});
+    server.next_client_id++;
+    
+    try {
+        socket.set_option(tcp::no_delay(true)); // set the TCP_NODELAY flag
+        if (PRINT) cout << "Hey look, a new attendand appeared!\n";
+
+        read_streambuf.consume(read_streambuf.size());
+        send_streambuf.consume(send_streambuf.size());
+        
+        ServerMessageClient hello = Hello {server.hello_message()};
+        serialize(hello, send_streambuf);
+
+        print_streambuf(send_streambuf);
+
+        co_await socket.async_send(send_streambuf.data(), use_awaitable);
+
+        sleep(5);
+    } 
+    catch(exception &e) {
+        cerr << "error: " << e.what() << " from client " << client_id << ", DISCONNECTING...\n";
+    }
+    catch(...) {
+        cerr << "error of unknown type from client " << client_id << ", DISCONNECTING...\n";
+    }
+    
+    server.queued_messages.erase(client_id);
+    server.connected_clients--;
+    co_return;
+}
+
+awaitable<void> tcp_acceptor() {
+    auto executor = co_await boost::asio::this_coro::executor;
+    boost::asio::ip::tcp::acceptor acceptor(
+        executor,
+        {boost::asio::ip::tcp::v6(), server.settings.port}
+    );
+
+    for (;;) {
+        boost::asio::ip::tcp::socket new_socket = co_await acceptor.async_accept(use_awaitable);
+        if (PRINT) cout << "A new connection...\n";
+        if (server.connected_clients < MAX_CLIENTS) {
+            if (PRINT) cout << "...that we can accept!\n";
+            server.connected_clients++;
+            co_spawn(executor, client_attendant(move(new_socket)), detached);
+        }
+    }
+    co_return;
+}
+
+awaitable<void> server_runner() {
+    for (;;) {
+        server.reset_game_state();
+        while (server.accepted_players.size() < server.settings.players_count) {
+            if (PRINT) cout << "Not enough players...\n";
+            co_await wait_for(server.settings.turn_duration);
+        }
+
+        server.game_state.is_active = true;
+        ServerMessageClient game_started = server.start_game();
+        for (auto &[client_id, queue] : server.queued_messages) {
+            server.queued_messages[client_id].push(game_started);
+        }
+
+        while (server.game_state.turn_number <= server.settings.game_length) {
+            if (PRINT) cout << "snooze...\n";
+            co_await wait_for(server.settings.turn_duration);
+            Turn turn_message = server.simulate_turn();
+            
+            // send turn_message to all clients
+        }
+
+        server.game_state.is_active = false;
+        // send game ended to all
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -390,6 +512,14 @@ int main(int argc, char *argv[]) {
 
     try {
         boost::asio::io_context io_context;
+
+        boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
+        signals.async_wait([&](auto, auto){ io_context.stop(); });
+
+        co_spawn(io_context, server_runner, rethrow_exception);
+        co_spawn(io_context, tcp_acceptor, rethrow_exception);
+
+        io_context.run();
     }
     catch (exception &e) {
         cerr << "error: " << e.what() << "\n";
