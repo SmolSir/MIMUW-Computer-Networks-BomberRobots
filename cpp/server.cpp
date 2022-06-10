@@ -11,6 +11,9 @@ namespace po = boost::program_options;
 /* -------------------------------------------------------------------------
    Useful structures and declarations
    ------------------------------------------------------------------------- */
+/* helper template for variant::visit */
+template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+
 /* structure for storing initial server params */
 struct Settings {
     uint16_t bomb_timer;
@@ -46,15 +49,18 @@ struct Server {
     PlayerId next_player_id;
     BombId next_bomb_id;
     
-    map<PlayerId, ClientMessageServer> players_messages;
+    map<PlayerId, ClientMessageServer> player_messages;
     vector<AcceptedPlayer> accepted_players;
     vector<Turn> completed_turns;
 
     template <Unsigned T>
     T random(T mod);
     Position random_position();
-
+    
     void reset_game_state();
+    bool validate_position(SignedPosition &signed_position);
+    BombExploded explosion(BombId bomb_id);
+
     Hello hello_message();
     AcceptedPlayer add_accepted_player(Player &player);
     Turn simulate_turn();
@@ -66,8 +72,14 @@ struct Server {
    Global variables for less argument passing
    ------------------------------------------------------------------------- */
 po::variables_map program_params;
-
+map<Direction, SignedPosition> move_map = {
+    {Direction::Up, {0, 1}}, 
+    {Direction::Right, {1, 0}}, 
+    {Direction::Down, {0, -1}}, 
+    {Direction::Left, {-1, 0}},
+};
 Server server;
+
 
 /* -------------------------------------------------------------------------
    Parsing & helper functions
@@ -119,6 +131,20 @@ bool process_command_line(int argc, char **argv) {
     return true;
 }
 
+SignedPosition to_signed_position(Position &position) {
+    return SignedPosition {
+        .x = static_cast<int32_t>(position.x),
+        .y = static_cast<int32_t>(position.y),
+    };
+}
+
+Position from_signed_position(SignedPosition &signed_position) {
+    return Position {
+        .x = static_cast<uint16_t>(signed_position.x),
+        .y = static_cast<uint16_t>(signed_position.y),
+    };
+}
+
 void GameState::reset() {
     turn_number = 0;
     players = { };
@@ -146,11 +172,21 @@ void Server::reset_game_state() {
     next_bomb_id = 0;
     next_player_id = 0;
 
-    players_messages = { };
+    player_messages = { };
     accepted_players = { };
     completed_turns = { };
 
     return;
+}
+
+bool Server::validate_position(SignedPosition &signed_position) {
+    return (signed_position.x >= 0 && signed_position.x < settings.size_x &&
+            signed_position.y >= 0 && signed_position.y < settings.size_y);
+}
+
+BombExploded Server::explosion(BombId bomb_id) {
+    vector<PlayerId> robots_destroyed = { };
+    vector<Position> blocks_destroyed = { };
 }
 
 Hello Server::hello_message() {
@@ -187,10 +223,6 @@ GameStarted Server::start_game() {
 
 Turn Server::simulate_turn() {
     vector<Event> events = { };
-    set<Position> blocks_destroyed = { };
-    set<PlayerId> robots_destroyed = { };
-
-    Turn turn_result;
 
     if (game_state.turn_number == 0) {
         for (auto const &[id, player] : game_state.players) {
@@ -204,21 +236,99 @@ Turn Server::simulate_turn() {
             game_state.blocks.insert(position);
             events.push_back(BlockPlaced {position});
         }
-
-        turn_result = {
-            .turn = game_state.turn_number,
-            .events = events,
-        };
     }
     else { // game_state.turn_number > 0
+        set<PlayerId> robots_destroyed = { };
+        set<Position> blocks_destroyed = { };
+        set<BombId> bombs_exploded = { };
 
+        /* Bomb explosions */
+        for (auto &[bomb_id, bomb] : game_state.bombs) {
+            bomb.timer--;
+            if (bomb.timer == 0) {
+                BombExploded bomb_exploded = explosion(bomb_id);
+                for (auto const &player_id : bomb_exploded.robots_destroyed) {
+                    robots_destroyed.insert(player_id);
+                }
+                for (auto const &block : bomb_exploded.blocks_destroyed) {
+                    blocks_destroyed.insert(block);
+                }
+                events.push_back(bomb_exploded);
+                bombs_exploded.insert(bomb_id);
+            }
+        }
+
+        for (auto const &block : blocks_destroyed) {
+            game_state.blocks.erase(block);
+        }
+        for (auto const &bomb : bombs_exploded) {
+            game_state.bombs.erase(bomb);
+        }
+
+        /* player messages */
+        for (auto const &[player_id, player] : game_state.players) {
+            if (robots_destroyed.contains(player_id)) {
+                Position respawn_position = random_position();
+                events.push_back(PlayerMoved {player_id, respawn_position});
+                game_state.robot_positions[player_id] = respawn_position;
+                game_state.scores[player_id]++;
+            }
+            else if (player_messages.contains(player_id)) { // player did something
+                Position position = game_state.robot_positions[player_id];
+                        
+                visit(overloaded {
+                    [&](Join) {}, // ignore
+                    [&](PlaceBomb) {
+                        Bomb bomb = {
+                            .position = position,
+                            .timer = settings.bomb_timer,
+                        };
+                        BombPlaced bomb_placed = {
+                            .id = next_bomb_id,
+                            .position = position,
+                        };
+
+                        events.push_back(bomb_placed);
+                        game_state.bombs.insert({next_bomb_id, bomb});
+                        next_bomb_id++;
+                    },
+                    [&](PlaceBlock) {
+                        if (!game_state.blocks.contains(position)) {
+                            events.push_back(BlockPlaced {position});
+                            game_state.blocks.insert(position);
+                        }
+                    },
+                    [&](Move new_move) {
+                        SignedPosition new_signed_position = to_signed_position(position);
+                        new_signed_position += move_map[new_move.direction];
+
+                        if (validate_position(new_signed_position)) {
+                            Position new_position = from_signed_position(new_signed_position);
+
+                            if (!game_state.blocks.contains(new_position)) {
+                                PlayerMoved player_moved {
+                                    .id = player_id,
+                                    .position = new_position,
+                                };
+                                events.push_back(player_moved);
+                                game_state.robot_positions[player_id] = new_position;
+                            }
+                        }
+                    },
+                }, player_messages[player_id]);
+            }
+        }
     }
 
-    game_state.turn_number++;
-    players_messages = { };
-    completed_turns.push_back(turn_result);
+    Turn turn = {
+        .turn = game_state.turn_number,
+        .events = events,
+    };
+    completed_turns.push_back(turn);
 
-    return turn_result;
+    player_messages = { };
+    game_state.turn_number++;
+    return turn;
 }
 
 GameEnded Server::end_game() {
